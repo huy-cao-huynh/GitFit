@@ -49,9 +49,10 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="workout/choose" options={{ presentation: 'modal' }} />
         <Stack.Screen name="workout/[id]" />
+        <Stack.Screen name="cardio/[id]" />
         <Stack.Screen name="history/[id]" />
         <Stack.Screen name="routine/[id]" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="goals" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="cardio-routine/[id]" options={{ presentation: 'modal' }} />
       </Stack.Protected>
     </Stack>
   );

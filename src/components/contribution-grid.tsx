@@ -2,14 +2,22 @@ import Svg, { Rect, Text as SvgText } from 'react-native-svg';
 
 import { Colors, Fonts, Palette, Spacing } from '@/constants/theme';
 import { toDateKey } from '@/lib/store/derive';
-import type { Session } from '@/lib/store/types';
+import type { CardioSession, Session } from '@/lib/store/types';
 
 const GAP = 3;
 const LABEL_HEIGHT = 16;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** GitHub-style year-to-date grid; cell intensity scales with session duration. */
-export function ContributionGrid({ sessions, width }: { sessions: Session[]; width: number }) {
+export function ContributionGrid({
+  sessions,
+  cardioSessions = [],
+  width,
+}: {
+  sessions: Session[];
+  cardioSessions?: CardioSession[];
+  width: number;
+}) {
   if (width <= 0) return null;
 
   const today = new Date();
@@ -25,6 +33,9 @@ export function ContributionGrid({ sessions, width }: { sessions: Session[]; wid
   const minutesByDate = new Map<string, number>();
   for (const session of sessions) {
     minutesByDate.set(session.date, (minutesByDate.get(session.date) ?? 0) + session.durationMinutes);
+  }
+  for (const session of cardioSessions) {
+    minutesByDate.set(session.date, (minutesByDate.get(session.date) ?? 0) + session.minutes);
   }
 
   const todayKey = toDateKey(today);

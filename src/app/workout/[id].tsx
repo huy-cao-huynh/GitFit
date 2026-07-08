@@ -1,47 +1,70 @@
-import Slider from '@react-native-community/slider';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SymbolView } from 'expo-symbols';
 import Svg, { Circle } from 'react-native-svg';
 
-import { Chevron } from '@/components/chevron';
+import { ActivityRings } from '@/components/activity-rings';
 import { GlowBackground } from '@/components/glow-background';
 import { SortableList } from '@/components/sortable-list';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
-import { todayKey } from '@/lib/store/derive';
-import { makeId } from '@/lib/store/storage';
-import type { RoutineExercise, Session, SessionExercise } from '@/lib/store/types';
+import { Colors, MaxContentWidth, RingColors, Spacing } from '@/constants/theme';
+import { currentGoalValue, todayKey } from '@/lib/store/derive';
+import { makeId } from '@/lib/store/id';
+import type { ExerciseKind, RoutineExercise, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
+import { fromDisplayWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 const REST_SECONDS = 30;
-const QUEUE_ROW_HEIGHT = 44;
+const QUEUE_ROW_HEIGHT = 56;
 
-type SetPhase = 'pending' | 'inProgress' | 'resting';
+type SessionPhase = 'exerciseReady' | 'setPending' | 'setActive' | 'resting' | 'finished';
+type WorkoutExercise = RoutineExercise & { targetRestSec?: number };
+
+interface ExerciseEditDraft {
+  id: string;
+  name: string;
+  kind: ExerciseKind;
+  sets: number;
+  targetReps: number;
+  targetWeight: number;
+  targetDurationSec: number;
+  targetRestSec: number;
+}
+
+function toWorkoutExercise(exercise: RoutineExercise): WorkoutExercise {
+  return {
+    ...exercise,
+    kind: exercise.kind ?? 'reps',
+    targetDurationSec: exercise.targetDurationSec ?? 45,
+    targetRestSec: REST_SECONDS,
+  };
+}
 
 export default function ActiveWorkoutScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { routines, addSession } = useStore();
+  const { routines, sessions, cardioSessions, goals, waterEntries, addSession, preferences } = useStore();
+  const unitSystem = preferences.unitSystem;
   const routine = routines.find((r) => r.id === id);
 
-  const [order, setOrder] = useState<RoutineExercise[]>(routine?.exercises ?? []);
-  const [phase, setWorkoutPhase] = useState<'idle' | 'active'>('idle');
+  const [order, setOrder] = useState<WorkoutExercise[]>(routine?.exercises.map(toWorkoutExercise) ?? []);
+  const [phase, setPhase] = useState<SessionPhase>('exerciseReady');
   const [exerciseIndex, setExerciseIndex] = useState(0);
   const [setIndex, setSetIndex] = useState(0);
-  const [setPhase, setSetPhase] = useState<SetPhase>('pending');
   const [logged, setLogged] = useState<SessionExercise[]>([]);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [reps, setReps] = useState(routine?.exercises[0]?.targetReps ?? 10);
   const [weight, setWeight] = useState(routine?.exercises[0]?.targetWeight ?? 0);
-  const [queueExpanded, setQueueExpanded] = useState(false);
+  const [durationSec, setDurationSec] = useState(routine?.exercises[0]?.targetDurationSec ?? 45);
+  const [editingDraft, setEditingDraft] = useState<ExerciseEditDraft | null>(null);
+  const [finishedSession, setFinishedSession] = useState<Session | null>(null);
 
-  // Elapsed time recomputes from the wall clock so backgrounding stays accurate.
   useEffect(() => {
-    if (phase !== 'active' || startedAt === null) return;
+    if (startedAt === null || phase === 'finished') return;
     const interval = setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
     }, 1000);
@@ -64,128 +87,278 @@ export default function ActiveWorkoutScreen() {
     );
   }
 
-  const totalSets = order.reduce((sum, e) => sum + e.sets, 0);
-  const completedSets = logged.reduce((sum, e) => sum + e.sets.length, 0);
-  const overallProgress = totalSets > 0 ? completedSets / totalSets : 0;
+  const exerciseKind = exercise.kind ?? 'reps';
+  const totalSets = order.reduce((sum, item) => sum + item.sets, 0);
+  const completedSets = logged.reduce((sum, item) => sum + item.sets.filter((set) => !set.skipped).length, 0);
+  const attemptedSets = logged.reduce((sum, item) => sum + item.sets.length, 0);
+  const overallProgress = totalSets > 0 ? attemptedSets / totalSets : 0;
   const isLastSet = setIndex + 1 >= exercise.sets;
   const isLastExercise = exerciseIndex + 1 >= order.length;
-  const nextExercise = order[exerciseIndex + 1];
-  const queue = order.slice(exerciseIndex + 1);
+  const workoutCalories = Math.max(1, Math.round(elapsedSec / 60)) * 8;
 
-  const appendLog = (current: SessionExercise[]): SessionExercise[] => {
-    const existing = current.find((e) => e.exerciseId === exercise.id);
-    if (existing) {
-      return current.map((e) =>
-        e.exerciseId === exercise.id ? { ...e, sets: [...e.sets, { reps, weight }] } : e,
-      );
-    }
-    return [...current, { exerciseId: exercise.id, name: exercise.name, sets: [{ reps, weight }] }];
+  const startExercise = () => {
+    setStartedAt((value) => value ?? Date.now());
+    setReps(exercise.targetReps);
+    setWeight(exercise.targetWeight);
+    setDurationSec(exercise.targetDurationSec ?? 45);
+    setPhase('setPending');
   };
 
-  const finishWorkout = (finalLogged: SessionExercise[]) => {
+  const appendLog = (set: SetLog): SessionExercise[] => {
+    const existing = logged.find((item) => item.exerciseId === exercise.id);
+    if (existing) {
+      return logged.map((item) =>
+        item.exerciseId === exercise.id ? { ...item, sets: [...item.sets, set] } : item,
+      );
+    }
+    return [...logged, { exerciseId: exercise.id, name: exercise.name, sets: [set] }];
+  };
+
+  const completeSet = (override?: SetLog) => {
+    const next = appendLog(
+      override ??
+        (exerciseKind === 'time'
+          ? { kind: 'time', durationSec }
+          : { kind: 'reps', reps, weight }),
+    );
+    setLogged(next);
+
+    if (isLastSet && isLastExercise) {
+      finishWorkout(next);
+    } else if (isLastSet) {
+      setPhase('resting');
+    } else {
+      setPhase('resting');
+    }
+  };
+
+  const skipSet = () => {
+    completeSet(exerciseKind === 'time' ? { kind: 'time', durationSec: 0, skipped: true } : { kind: 'reps', skipped: true });
+  };
+
+  const advanceAfterRest = () => {
+    if (!isLastSet) {
+      setSetIndex((index) => index + 1);
+      setPhase('setPending');
+      return;
+    }
+
+    const upcoming = order[exerciseIndex + 1];
+    if (upcoming) {
+      setExerciseIndex((index) => index + 1);
+      setSetIndex(0);
+      setReps(upcoming.targetReps);
+      setWeight(upcoming.targetWeight);
+      setDurationSec(upcoming.targetDurationSec ?? 45);
+      setPhase('exerciseReady');
+    }
+  };
+
+  const buildSession = (finalLogged: SessionExercise[]): Session => {
     const durationMinutes = Math.max(1, Math.round(elapsedSec / 60));
-    const session: Session = {
+    return {
       id: makeId(),
       routineId: routine.id,
       routineName: routine.name,
       date: todayKey(),
       durationMinutes,
       calories: durationMinutes * 8,
-      exercises: finalLogged,
+      exercises: finalLogged.filter((item) => item.sets.some((set) => !set.skipped)),
     };
-    if (finalLogged.length > 0) addSession(session);
-    router.back();
   };
 
-  const startWorkout = () => {
-    setWorkoutPhase('active');
-    setStartedAt(Date.now());
-    setReps(exercise.targetReps);
-    setWeight(exercise.targetWeight);
+  const finishWorkout = (finalLogged: SessionExercise[]) => {
+    const session = buildSession(finalLogged);
+    if (session.exercises.length > 0) addSession(session);
+    setFinishedSession(session);
+    setPhase('finished');
   };
 
-  const completeSet = () => {
-    const next = appendLog(logged);
-    setLogged(next);
-    if (isLastSet && isLastExercise) {
-      finishWorkout(next);
-    } else {
-      setSetPhase('resting');
-    }
-  };
-
-  const advanceAfterRest = () => {
-    if (!isLastSet) {
-      setSetIndex(setIndex + 1);
-    } else {
-      const upcoming = order[exerciseIndex + 1];
-      setExerciseIndex(exerciseIndex + 1);
-      setSetIndex(0);
-      if (upcoming) {
-        setReps(upcoming.targetReps);
-        setWeight(upcoming.targetWeight);
-      }
-    }
-    setSetPhase('pending');
-  };
-
-  const handleEnd = () => {
-    if (phase === 'active' && completedSets > 0) {
-      finishWorkout(logged);
-    } else {
-      router.back();
-    }
+  const confirmEnd = () => {
+    Alert.alert('End workout early?', 'Your completed sets will be saved and skipped sets will be ignored.', [
+      { text: 'Keep going', style: 'cancel' },
+      {
+        text: 'End workout',
+        style: 'destructive',
+        onPress: () => {
+          if (logged.some((item) => item.sets.some((set) => !set.skipped))) {
+            finishWorkout(logged);
+          } else {
+            router.dismissTo('/dashboard');
+          }
+        },
+      },
+    ]);
   };
 
   const reorderQueue = (orderedKeys: string[]) => {
     setOrder((current) => {
-      const head = current.slice(0, exerciseIndex + 1);
-      const tail = current.slice(exerciseIndex + 1);
-      const byId = new Map(tail.map((e) => [e.id, e]));
-      const newTail = orderedKeys.map((key) => byId.get(key)).filter((e): e is RoutineExercise => !!e);
-      return newTail.length === tail.length ? [...head, ...newTail] : current;
+      const completed = current.slice(0, exerciseIndex);
+      const movable = current.slice(exerciseIndex);
+      const byId = new Map(movable.map((item) => [item.id, item]));
+      const reordered = orderedKeys.map((key) => byId.get(key)).filter((item): item is WorkoutExercise => !!item);
+      return reordered.length === movable.length ? [...completed, ...reordered] : current;
     });
   };
 
-  if (phase === 'idle') {
+  const beginEdit = (item: WorkoutExercise) => {
+    setEditingDraft({
+      id: item.id,
+      name: item.name,
+      kind: item.kind ?? 'reps',
+      sets: item.sets,
+      targetReps: item.targetReps,
+      targetWeight: item.targetWeight,
+      targetDurationSec: item.targetDurationSec ?? 45,
+      targetRestSec: item.targetRestSec ?? REST_SECONDS,
+    });
+  };
+
+  const patchEditingDraft = (patch: Partial<ExerciseEditDraft>) => {
+    setEditingDraft((current) => (current ? { ...current, ...patch } : current));
+  };
+
+  const saveExerciseEdit = () => {
+    const nextName = editingDraft?.name.trim();
+    if (!editingDraft || !nextName) return;
+    const nextExercise: WorkoutExercise = {
+      id: editingDraft.id,
+      name: nextName,
+      kind: editingDraft.kind,
+      sets: editingDraft.sets,
+      targetReps: editingDraft.targetReps,
+      targetWeight: editingDraft.targetWeight,
+      targetDurationSec: editingDraft.targetDurationSec,
+      targetRestSec: editingDraft.targetRestSec,
+      lastTime: order.find((item) => item.id === editingDraft.id)?.lastTime ?? null,
+    };
+
+    setOrder((current) => current.map((item) => (item.id === editingDraft.id ? nextExercise : item)));
+    if (exercise.id === editingDraft.id) {
+      setReps(nextExercise.targetReps);
+      setWeight(nextExercise.targetWeight);
+      setDurationSec(nextExercise.targetDurationSec ?? 45);
+      setSetIndex((index) => Math.min(index, nextExercise.sets - 1));
+    }
+    setEditingDraft(null);
+  };
+
+  if (phase === 'finished') {
+    const session = finishedSession ?? buildSession(logged);
+    const updatedSessions = [session, ...sessions];
+
+    return (
+      <View style={styles.container}>
+        <GlowBackground variant="session" />
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.finishedHeader}>
+            <ThemedText type="title">Workout finished!</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Nice work. Your weekly rings have been updated.
+            </ThemedText>
+          </View>
+
+          <ActivityRings
+            animated
+            size={220}
+            strokeWidth={15}
+            gap={6}
+            rings={goals.map((goal, index) => ({
+              progress: currentGoalValue(goal, updatedSessions, cardioSessions, waterEntries) / goal.target,
+              color: RingColors[index % RingColors.length],
+              trackColor: colors.backgroundSelected,
+            }))}
+          />
+
+          <View style={styles.summaryRow}>
+            <SummaryStat value={`${session.durationMinutes}`} unit="min" label="Duration" />
+            <SummaryStat value={`${session.calories ?? workoutCalories}`} unit="cal" label="Calories" />
+            <SummaryStat value={`${completedSets}`} unit="sets" label="Completed" />
+          </View>
+
+          <ScrollView style={styles.flex} contentContainerStyle={styles.finishedList}>
+            {session.exercises.map((item) => (
+              <ThemedView key={item.exerciseId} type="backgroundElement" style={styles.finishedExercise}>
+                <ThemedText type="smallBold">{item.name}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {item.sets.filter((set) => !set.skipped).length} sets
+                </ThemedText>
+              </ThemedView>
+            ))}
+          </ScrollView>
+
+          <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
+            <ThemedText type="smallBold" style={styles.primaryButtonText}>
+              Return to Home
+            </ThemedText>
+          </Pressable>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (phase === 'exerciseReady') {
+    const movable = order.slice(exerciseIndex);
+
     return (
       <View style={styles.container}>
         <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.topRow}>
-            <View style={styles.flex} />
-            <Pressable onPress={() => router.back()} hitSlop={12}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
+              {routine.name}
+            </ThemedText>
+            <Pressable onPress={startedAt ? confirmEnd : () => router.back()} hitSlop={12}>
               <ThemedText type="small" themeColor="textSecondary">
-                Cancel
+                {startedAt ? 'End' : 'Cancel'}
               </ThemedText>
             </Pressable>
           </View>
 
-          <ThemedText type="small" themeColor="textSecondary">
-            {routine.exercises.length} exercises · {routine.durationMinutes} min · {routine.level}
-          </ThemedText>
-          <ThemedText type="subtitle">{routine.name}</ThemedText>
+          <View style={styles.exerciseHeader}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              NEXT EXERCISE
+            </ThemedText>
+            <ThemedText type="subtitle">{exercise.name}</ThemedText>
+          </View>
 
-          <ScrollView style={styles.flex} contentContainerStyle={styles.overviewList}>
-            {order.map((item, index) => (
-              <View key={item.id} style={styles.overviewRow}>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.overviewIndex}>
-                  {index + 1}
-                </ThemedText>
-                <ThemedText type="small" style={styles.flex}>
-                  {item.name}
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {item.sets} × {item.targetReps}
-                  {item.targetWeight > 0 ? ` @ ${item.targetWeight} lbs` : ''}
-                </ThemedText>
-              </View>
+          <ScrollView style={styles.flex} contentContainerStyle={styles.checklist}>
+            {order.slice(0, exerciseIndex).map((item) => (
+              <ExerciseStatusRow key={item.id} item={item} index={order.indexOf(item)} status="done" unitSystem={unitSystem} />
             ))}
+            <SortableList
+              items={movable}
+              keyFor={(item) => item.id}
+              rowHeight={QUEUE_ROW_HEIGHT}
+              onOrderChange={reorderQueue}
+              renderRow={(item) => {
+                const absoluteIndex = order.findIndex((candidate) => candidate.id === item.id);
+                return (
+                  <EditableExerciseRow
+                    item={item}
+                    index={absoluteIndex}
+                    active={absoluteIndex === exerciseIndex}
+                    editing={editingDraft?.id === item.id}
+                    onBeginEdit={() => beginEdit(item)}
+                    unitSystem={unitSystem}
+                  />
+                );
+              }}
+            />
+            {editingDraft ? (
+              <ExerciseEditPanel
+                draft={editingDraft}
+                unitSystem={unitSystem}
+                onChangeDraft={patchEditingDraft}
+                onCancel={() => setEditingDraft(null)}
+                onSave={saveExerciseEdit}
+              />
+            ) : null}
           </ScrollView>
 
-          <Pressable style={styles.primaryButton} onPress={startWorkout}>
+          <Pressable style={styles.primaryButton} onPress={startExercise}>
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
-              Start Workout
+              Start Exercise
             </ThemedText>
           </Pressable>
         </SafeAreaView>
@@ -206,7 +379,7 @@ export default function ActiveWorkoutScreen() {
                   styles.progressSegment,
                   {
                     backgroundColor:
-                      index < setIndex || (index === setIndex && setPhase !== 'pending')
+                      index < setIndex || (index === setIndex && phase !== 'setPending')
                         ? colors.accent
                         : colors.backgroundSelected,
                   },
@@ -214,7 +387,7 @@ export default function ActiveWorkoutScreen() {
               />
             ))}
           </View>
-          <Pressable onPress={handleEnd} hitSlop={12}>
+          <Pressable onPress={confirmEnd} hitSlop={12}>
             <ThemedText type="small" themeColor="textSecondary">
               End
             </ThemedText>
@@ -229,42 +402,13 @@ export default function ActiveWorkoutScreen() {
         </View>
 
         <View style={styles.flex}>
-          {setPhase === 'pending' && (
-            <ThemedView type="backgroundElement" style={styles.targetCard}>
-              <View style={styles.targetRow}>
-                <View style={styles.targetColumn}>
-                  <ThemedText type="title" style={styles.targetValue}>
-                    {exercise.targetReps}
-                  </ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    target reps
-                  </ThemedText>
-                </View>
-                <View style={styles.targetDivider} />
-                <View style={styles.targetColumn}>
-                  <ThemedText type="title" style={styles.targetValue}>
-                    {exercise.targetWeight}
-                    <ThemedText type="small" style={{ color: colors.accentLight }}>
-                      {' '}
-                      lbs
-                    </ThemedText>
-                  </ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    target weight
-                  </ThemedText>
-                </View>
-              </View>
-              {exercise.lastTime && (
-                <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
-                  Last time: {exercise.lastTime.reps} reps @ {exercise.lastTime.weight} lbs
-                </ThemedText>
-              )}
-            </ThemedView>
+          {phase === 'setPending' && (
+            <TargetCard exercise={exercise} kind={exerciseKind} unitSystem={unitSystem} />
           )}
 
-          {setPhase === 'inProgress' && (
-            <ThemedView type="backgroundElement" style={styles.sliderCard}>
-              <SliderRow
+          {phase === 'setActive' && exerciseKind === 'reps' && (
+            <ThemedView type="backgroundElement" style={styles.setStepperCard}>
+              <InlineStepper
                 label="Reps"
                 value={reps}
                 min={1}
@@ -272,66 +416,58 @@ export default function ActiveWorkoutScreen() {
                 step={1}
                 onChange={setReps}
               />
-              <SliderRow
+              <InlineStepper
                 label="Weight"
-                value={weight}
+                value={toDisplayWeight(weight, unitSystem)}
                 min={0}
-                max={Math.max(exercise.targetWeight * 2, 100)}
-                step={5}
-                unit="lbs"
-                onChange={setWeight}
+                max={Math.max(toDisplayWeight(exercise.targetWeight, unitSystem) * 2, unitSystem === 'metric' ? 45 : 100)}
+                step={unitSystem === 'metric' ? 1 : 2.5}
+                unit={weightUnitLabel(unitSystem)}
+                onChange={(displayValue) => setWeight(fromDisplayWeight(displayValue, unitSystem))}
               />
             </ThemedView>
           )}
 
-          {setPhase === 'resting' && (
-            <RestTimer
-              key={`${exerciseIndex}-${setIndex}`}
-              seconds={REST_SECONDS}
-              nextLabel={!isLastSet ? `Set ${setIndex + 2} of ${exercise.sets}` : nextExercise?.name ?? ''}
-              onDone={advanceAfterRest}
+          {phase === 'setActive' && exerciseKind === 'time' && (
+            <CountdownTimer
+              key={`${exercise.id}-${setIndex}`}
+              seconds={durationSec}
+              label="WORK"
+              onDone={() => completeSet({ kind: 'time', durationSec })}
             />
           )}
 
-          {nextExercise && setPhase !== 'resting' && (
-            <Pressable onPress={() => setQueueExpanded((expanded) => !expanded)}>
-              <ThemedView type="backgroundElement" style={styles.nextCard}>
-                <ThemedText type="smallBold" style={{ color: colors.accentLight }}>
-                  NEXT
-                </ThemedText>
-                <ThemedText type="small" style={styles.flex}>
-                  {nextExercise.name}
-                </ThemedText>
-                <View style={{ transform: [{ rotate: queueExpanded ? '90deg' : '-90deg' }] }}>
-                  <Chevron color={colors.textSecondary} />
-                </View>
-              </ThemedView>
-            </Pressable>
-          )}
-
-          {queueExpanded && setPhase !== 'resting' && (
-            <View style={styles.queueList}>
-              <SortableList
-                items={queue}
-                keyFor={(item) => item.id}
-                rowHeight={QUEUE_ROW_HEIGHT}
-                onOrderChange={reorderQueue}
-                renderRow={(item) => (
-                  <ThemedText type="small" numberOfLines={1}>
-                    {item.name}
-                  </ThemedText>
-                )}
-              />
-            </View>
+          {phase === 'resting' && (
+            <CountdownTimer
+              key={`rest-${exercise.id}-${setIndex}`}
+              seconds={exercise.targetRestSec ?? REST_SECONDS}
+              label="REST"
+              nextLabel={!isLastSet ? `Set ${setIndex + 2} of ${exercise.sets}` : order[exerciseIndex + 1]?.name ?? ''}
+              onDone={advanceAfterRest}
+              skippable
+            />
           )}
         </View>
 
-        {setPhase !== 'resting' && (
-          <Pressable
-            style={styles.primaryButton}
-            onPress={setPhase === 'pending' ? () => setSetPhase('inProgress') : completeSet}>
+        {phase === 'setPending' && (
+          <View style={styles.actionRow}>
+            <Pressable style={styles.secondaryButton} onPress={skipSet}>
+              <ThemedText type="smallBold" style={{ color: colors.accent }}>
+                Skip Set
+              </ThemedText>
+            </Pressable>
+            <Pressable style={[styles.primaryButton, styles.flex]} onPress={() => setPhase('setActive')}>
+              <ThemedText type="smallBold" style={styles.primaryButtonText}>
+                Start Set
+              </ThemedText>
+            </Pressable>
+          </View>
+        )}
+
+        {phase === 'setActive' && exerciseKind === 'reps' && (
+          <Pressable style={styles.primaryButton} onPress={() => completeSet()}>
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
-              {setPhase === 'pending' ? 'Start Set' : 'Complete Set'}
+              Complete Set
             </ThemedText>
           </Pressable>
         )}
@@ -354,13 +490,342 @@ export default function ActiveWorkoutScreen() {
   );
 }
 
-function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+function TargetCard({
+  exercise,
+  kind,
+  unitSystem,
+}: {
+  exercise: WorkoutExercise;
+  kind: 'reps' | 'time';
+  unitSystem: UnitSystem;
+}) {
+  return (
+    <ThemedView type="backgroundElement" style={styles.targetCard}>
+      {kind === 'time' ? (
+        <View style={styles.targetColumn}>
+          <ThemedText type="title" style={styles.targetValue}>
+            {formatDuration(exercise.targetDurationSec ?? 45)}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            target time
+          </ThemedText>
+        </View>
+      ) : (
+        <View style={styles.targetRow}>
+          <View style={styles.targetColumn}>
+            <ThemedText type="title" style={styles.targetValue}>
+              {exercise.targetReps}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              target reps
+            </ThemedText>
+          </View>
+          <View style={styles.targetDivider} />
+          <View style={styles.targetColumn}>
+            <ThemedText type="title" style={styles.targetValue}>
+              {toDisplayWeight(exercise.targetWeight, unitSystem)}
+              <ThemedText type="small" style={{ color: colors.accentLight }}>
+                {' '}
+                {weightUnitLabel(unitSystem)}
+              </ThemedText>
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              target weight
+            </ThemedText>
+          </View>
+        </View>
+      )}
+      {exercise.lastTime && (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
+          Last time: {formatSetLog(exercise.lastTime, unitSystem)}
+        </ThemedText>
+      )}
+      <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
+        Rest: {formatDuration(exercise.targetRestSec ?? REST_SECONDS)}
+      </ThemedText>
+    </ThemedView>
+  );
 }
 
-function SliderRow({
+function EditableExerciseRow({
+  item,
+  index,
+  active,
+  editing,
+  onBeginEdit,
+  unitSystem,
+}: {
+  item: WorkoutExercise;
+  index: number;
+  active: boolean;
+  editing: boolean;
+  onBeginEdit: () => void;
+  unitSystem: UnitSystem;
+}) {
+  return (
+    <View style={styles.editRow}>
+      <ExerciseStatusRow item={item} index={index} status={active ? 'current' : 'upcoming'} unitSystem={unitSystem} />
+      <Pressable hitSlop={8} onPress={onBeginEdit}>
+        <SymbolView name="pencil" size={16} tintColor={editing ? colors.accent : colors.textSecondary} />
+      </Pressable>
+    </View>
+  );
+}
+
+function ExerciseEditPanel({
+  draft,
+  unitSystem,
+  onChangeDraft,
+  onCancel,
+  onSave,
+}: {
+  draft: ExerciseEditDraft;
+  unitSystem: UnitSystem;
+  onChangeDraft: (patch: Partial<ExerciseEditDraft>) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const canSave = draft.name.trim().length > 0;
+  return (
+    <ThemedView type="backgroundElement" style={styles.editPanel}>
+      <TextInput
+        style={styles.replacementInput}
+        value={draft.name}
+        onChangeText={(name) => onChangeDraft({ name })}
+        placeholder="Exercise name"
+        placeholderTextColor={colors.textSecondary}
+        autoFocus
+      />
+      <ModeToggle kind={draft.kind} onChange={(kind) => onChangeDraft({ kind })} />
+      <View style={styles.editControls}>
+        <Stepper label="Sets" value={draft.sets} min={1} step={1} onChange={(sets) => onChangeDraft({ sets })} />
+        {draft.kind === 'time' ? (
+          <Stepper
+            label="Work"
+            value={draft.targetDurationSec}
+            min={5}
+            step={5}
+            suffix="sec"
+            onChange={(targetDurationSec) => onChangeDraft({ targetDurationSec })}
+          />
+        ) : (
+          <>
+            <Stepper
+              label="Reps"
+              value={draft.targetReps}
+              min={1}
+              step={1}
+              onChange={(targetReps) => onChangeDraft({ targetReps })}
+            />
+            <Stepper
+              label="Weight"
+              value={toDisplayWeight(draft.targetWeight, unitSystem)}
+              min={0}
+              step={unitSystem === 'metric' ? 1 : 2.5}
+              suffix={weightUnitLabel(unitSystem)}
+              onChange={(displayWeight) => onChangeDraft({ targetWeight: fromDisplayWeight(displayWeight, unitSystem) })}
+            />
+          </>
+        )}
+        <Stepper
+          label="Rest"
+          value={draft.targetRestSec}
+          min={0}
+          step={5}
+          suffix="sec"
+          onChange={(targetRestSec) => onChangeDraft({ targetRestSec })}
+        />
+      </View>
+      <View style={styles.editActions}>
+        <Pressable hitSlop={8} onPress={onCancel}>
+          <SymbolView name="xmark.circle.fill" size={22} tintColor={colors.textSecondary} />
+        </Pressable>
+        <Pressable hitSlop={8} onPress={onSave} disabled={!canSave}>
+          <SymbolView name="checkmark.circle.fill" size={22} tintColor={canSave ? colors.accent : colors.textSecondary} />
+        </Pressable>
+      </View>
+    </ThemedView>
+  );
+}
+
+function ExerciseStatusRow({
+  item,
+  index,
+  status,
+  unitSystem,
+}: {
+  item: WorkoutExercise;
+  index: number;
+  status: 'done' | 'current' | 'upcoming';
+  unitSystem: UnitSystem;
+}) {
+  const isDone = status === 'done';
+  const isCurrent = status === 'current';
+  return (
+    <View style={styles.statusRow}>
+      <View
+        style={[
+          styles.statusIcon,
+          isDone && { backgroundColor: colors.accent },
+          isCurrent && { borderColor: colors.accent },
+        ]}>
+        {isDone ? (
+          <SymbolView name="checkmark" size={12} tintColor={colors.background} />
+        ) : (
+          <ThemedText type="small" themeColor="textSecondary">
+            {index + 1}
+          </ThemedText>
+        )}
+      </View>
+      <View style={styles.flex}>
+        <ThemedText type="smallBold">{item.name}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          {describeExercise(item, unitSystem)}
+        </ThemedText>
+      </View>
+    </View>
+  );
+}
+
+function CountdownTimer({
+  seconds,
+  label,
+  nextLabel,
+  onDone,
+  skippable,
+}: {
+  seconds: number;
+  label: string;
+  nextLabel?: string;
+  onDone: () => void;
+  skippable?: boolean;
+}) {
+  const endsAt = useRef<number | null>(null);
+  const called = useRef(false);
+  const [remaining, setRemaining] = useState(seconds);
+
+  useEffect(() => {
+    endsAt.current ??= Date.now() + seconds * 1000;
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.ceil(((endsAt.current ?? 0) - Date.now()) / 1000));
+      setRemaining(left);
+      if (left === 0 && !called.current) {
+        called.current = true;
+        clearInterval(interval);
+        onDone();
+      }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [onDone, seconds]);
+
+  const size = 140;
+  const strokeWidth = 8;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = seconds > 0 ? remaining / seconds : 0;
+
+  return (
+    <View style={styles.timerArea}>
+      <ThemedText type="smallBold" themeColor="textSecondary">
+        {label}
+      </ThemedText>
+      <View style={{ width: size, height: size }}>
+        <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
+          <Circle cx={size / 2} cy={size / 2} r={radius} stroke={colors.backgroundSelected} strokeWidth={strokeWidth} fill="none" />
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={colors.accent}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - progress)}
+          />
+        </Svg>
+        <View style={styles.timerLabel}>
+          <ThemedText type="subtitle">{formatDuration(remaining)}</ThemedText>
+        </View>
+      </View>
+      {nextLabel ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          Up next: {nextLabel}
+        </ThemedText>
+      ) : null}
+      {skippable ? (
+        <Pressable style={styles.skipButton} onPress={onDone}>
+          <ThemedText type="smallBold" style={{ color: colors.accent }}>
+            Skip Rest
+          </ThemedText>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function Stepper({
+  label,
+  value,
+  min,
+  step,
+  suffix,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  step: number;
+  suffix?: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <View style={styles.stepper}>
+      <ThemedText type="small" themeColor="textSecondary">
+        {label}
+      </ThemedText>
+      <View style={styles.stepperControls}>
+        <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(Math.max(min, value - step))}>
+          <SymbolView name="minus" size={12} tintColor={colors.text} />
+        </Pressable>
+        <ThemedText type="smallBold" style={styles.stepperValue}>
+          {value}
+          {suffix ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              {' '}
+              {suffix}
+            </ThemedText>
+          ) : null}
+        </ThemedText>
+        <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(value + step)}>
+          <SymbolView name="plus" size={12} tintColor={colors.text} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ModeToggle({ kind, onChange }: { kind: ExerciseKind; onChange: (kind: ExerciseKind) => void }) {
+  return (
+    <View style={styles.modeToggle}>
+      {(['reps', 'time'] as ExerciseKind[]).map((option) => {
+        const active = kind === option;
+        return (
+          <Pressable
+            key={option}
+            style={[styles.modeButton, active && styles.modeButtonActive]}
+            onPress={() => onChange(option)}>
+            <ThemedText type="smallBold" style={active ? styles.modeTextActive : undefined}>
+              {option === 'reps' ? 'Reps' : 'Time'}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function InlineStepper({
   label,
   value,
   min,
@@ -377,112 +842,113 @@ function SliderRow({
   unit?: string;
   onChange: (value: number) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(formatStepperValue(value));
+
+  const commitDraft = () => {
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) {
+      onChange(clampToStep(parsed, min, max, step));
+    }
+    setEditing(false);
+  };
+
+  const changeBy = (delta: number) => {
+    onChange(clampToStep(value + delta, min, max, step));
+  };
+
   return (
-    <View style={styles.sliderRow}>
-      <View style={styles.sliderHeader}>
-        <ThemedText type="small" themeColor="textSecondary">
-          {label}
-        </ThemedText>
-        <ThemedText type="subtitle" style={styles.sliderValue}>
-          {value}
-          {unit ? (
-            <ThemedText type="small" themeColor="textSecondary">
-              {' '}
-              {unit}
-            </ThemedText>
-          ) : null}
-        </ThemedText>
+    <View style={styles.setStepperRow}>
+      <View style={styles.setStepperLabelWrap}>
+        <ThemedText type="smallBold">{label}</ThemedText>
+        {unit ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            {unit}
+          </ThemedText>
+        ) : null}
       </View>
-      <Slider
-        minimumValue={min}
-        maximumValue={max}
-        step={step}
-        value={value}
-        onValueChange={onChange}
-        minimumTrackTintColor={colors.accent}
-        maximumTrackTintColor={colors.backgroundSelected}
-        thumbTintColor={colors.text}
-      />
+      <View style={styles.setStepperControls}>
+        <Pressable style={styles.setStepperButton} onPress={() => changeBy(-step)}>
+          <SymbolView name="minus" size={18} tintColor={colors.text} />
+        </Pressable>
+        {editing ? (
+          <TextInput
+            style={styles.setStepperInput}
+            value={draft}
+            onChangeText={setDraft}
+            onBlur={commitDraft}
+            onSubmitEditing={commitDraft}
+            keyboardType="decimal-pad"
+            selectTextOnFocus
+            autoFocus
+          />
+        ) : (
+          <Pressable
+            style={styles.setStepperValueButton}
+            onPress={() => {
+              setDraft(formatStepperValue(value));
+              setEditing(true);
+            }}>
+            <ThemedText type="subtitle" style={styles.setStepperValue}>
+              {formatStepperValue(value)}
+            </ThemedText>
+          </Pressable>
+        )}
+        <Pressable style={styles.setStepperButton} onPress={() => changeBy(step)}>
+          <SymbolView name="plus" size={18} tintColor={colors.text} />
+        </Pressable>
+      </View>
     </View>
   );
 }
 
-/** Wall-clock rest countdown with a circular progress ring. */
-function RestTimer({
-  seconds,
-  nextLabel,
-  onDone,
-}: {
-  seconds: number;
-  nextLabel: string;
-  onDone: () => void;
-}) {
-  const endsAt = useRef<number | null>(null);
-  const [remaining, setRemaining] = useState(seconds);
+function clampToStep(value: number, min: number, max: number, step: number): number {
+  const clamped = Math.max(min, Math.min(max, value));
+  const stepped = min + Math.round((clamped - min) / step) * step;
+  return Number(Math.max(min, Math.min(max, stepped)).toFixed(2));
+}
 
-  useEffect(() => {
-    endsAt.current ??= Date.now() + seconds * 1000;
-    const interval = setInterval(() => {
-      const left = Math.max(0, Math.ceil(((endsAt.current ?? 0) - Date.now()) / 1000));
-      setRemaining(left);
-      if (left === 0) {
-        clearInterval(interval);
-        onDone();
-      }
-    }, 250);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const size = 140;
-  const strokeWidth = 8;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const progress = remaining / seconds;
-
+function SummaryStat({ value, unit, label }: { value: string; unit: string; label: string }) {
   return (
-    <View style={styles.restArea}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        REST
-      </ThemedText>
-      <View style={{ width: size, height: size }}>
-        <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={colors.backgroundSelected}
-            strokeWidth={strokeWidth}
-            fill="none"
-          />
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={colors.accent}
-            strokeWidth={strokeWidth}
-            fill="none"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={circumference * (1 - progress)}
-          />
-        </Svg>
-        <View style={styles.restLabel}>
-          <ThemedText type="subtitle">{formatDuration(remaining)}</ThemedText>
-        </View>
-      </View>
-      {nextLabel ? (
+    <View style={styles.summaryStat}>
+      <ThemedText type="subtitle" style={styles.summaryValue}>
+        {value}
         <ThemedText type="small" themeColor="textSecondary">
-          Up next: {nextLabel}
+          {' '}
+          {unit}
         </ThemedText>
-      ) : null}
-      <Pressable style={styles.skipButton} onPress={onDone}>
-        <ThemedText type="smallBold" style={{ color: colors.accent }}>
-          Skip Rest
-        </ThemedText>
-      </Pressable>
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        {label}
+      </ThemedText>
     </View>
   );
+}
+
+function describeExercise(exercise: WorkoutExercise, unitSystem: UnitSystem): string {
+  const restLabel = `, ${formatDuration(exercise.targetRestSec ?? REST_SECONDS)} rest`;
+  if ((exercise.kind ?? 'reps') === 'time') {
+    return `${exercise.sets} x ${formatDuration(exercise.targetDurationSec ?? 45)}${restLabel}`;
+  }
+  const weightLabel =
+    exercise.targetWeight > 0 ? ` @ ${toDisplayWeight(exercise.targetWeight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
+  return `${exercise.sets} x ${exercise.targetReps}${weightLabel}${restLabel}`;
+}
+
+function formatSetLog(set: { reps?: number; weight?: number; durationSec?: number }, unitSystem: UnitSystem): string {
+  if (set.durationSec !== undefined) return formatDuration(set.durationSec);
+  const weightLabel = set.weight ? ` @ ${toDisplayWeight(set.weight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
+  return `${set.reps ?? 0} reps${weightLabel}`;
+}
+
+function formatStepperValue(value: number): string {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+}
+
+function formatDuration(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({
@@ -521,18 +987,90 @@ const styles = StyleSheet.create({
   exerciseHeader: {
     gap: Spacing.half,
   },
-  overviewList: {
+  checklist: {
     gap: Spacing.two,
-    paddingTop: Spacing.three,
+    paddingVertical: Spacing.two,
   },
-  overviewRow: {
+  statusRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  statusIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: colors.backgroundSelected,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingVertical: Spacing.one,
   },
-  overviewIndex: {
-    width: 20,
+  editPanel: {
+    flex: 1,
+    gap: Spacing.two,
+  },
+  replacementInput: {
+    borderRadius: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    color: colors.text,
+    backgroundColor: colors.backgroundSelected,
+  },
+  editControls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.three,
+  },
+  editActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: Spacing.three,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    borderRadius: Spacing.three,
+    backgroundColor: colors.backgroundSelected,
+    padding: Spacing.half,
+  },
+  modeButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.accent,
+  },
+  modeTextActive: {
+    color: colors.background,
+  },
+  stepper: {
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  stepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  stepperButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.backgroundSelected,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValue: {
+    minWidth: 42,
+    textAlign: 'center',
   },
   targetCard: {
     borderRadius: Spacing.four,
@@ -560,30 +1098,63 @@ const styles = StyleSheet.create({
   lastTime: {
     textAlign: 'center',
   },
-  sliderCard: {
+  setStepperCard: {
     borderRadius: Spacing.four,
     padding: Spacing.four,
     gap: Spacing.four,
     marginBottom: Spacing.three,
   },
-  sliderRow: {
-    gap: Spacing.one,
+  setStepperRow: {
+    gap: Spacing.two,
   },
-  sliderHeader: {
+  setStepperLabelWrap: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sliderValue: {
-    fontSize: 28,
-    lineHeight: 32,
+  setStepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
-  restArea: {
+  setStepperButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.backgroundSelected,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  setStepperValueButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: Spacing.three,
+    backgroundColor: colors.backgroundSelected,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  setStepperValue: {
+    fontSize: 34,
+    lineHeight: 38,
+    color: colors.accentLight,
+  },
+  setStepperInput: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    textAlign: 'center',
+    fontSize: 34,
+    lineHeight: 38,
+    color: colors.accentLight,
+    backgroundColor: colors.backgroundSelected,
+  },
+  timerArea: {
     alignItems: 'center',
     gap: Spacing.three,
     paddingVertical: Spacing.three,
   },
-  restLabel: {
+  timerLabel: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -596,17 +1167,17 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.four,
   },
-  nextCard: {
-    borderRadius: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
+  actionRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
-  queueList: {
-    marginTop: Spacing.two,
-    paddingHorizontal: Spacing.two,
+  secondaryButton: {
+    borderRadius: Spacing.four,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.accent,
   },
   primaryButton: {
     borderRadius: Spacing.four,
@@ -633,6 +1204,30 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   bottomStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  finishedHeader: {
+    gap: Spacing.one,
+    alignItems: 'center',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  summaryStat: {
+    gap: Spacing.half,
+  },
+  summaryValue: {
+    fontSize: 26,
+    lineHeight: 30,
+  },
+  finishedList: {
+    gap: Spacing.two,
+  },
+  finishedExercise: {
+    borderRadius: Spacing.three,
+    padding: Spacing.three,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },

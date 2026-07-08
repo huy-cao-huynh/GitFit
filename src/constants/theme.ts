@@ -31,8 +31,12 @@ export const Colors = {
 
 export type ThemeColor = keyof typeof Colors;
 
-/** Warm ring hues, outermost first (move / workouts / cardio). */
-export const RingColors = [Palette.redOrange, Palette.orange, Palette.yellow] as const;
+/**
+ * Ring hues, outermost first. One goal ring is added/removed per active
+ * modular goal on the Dashboard; colors cycle if more goals than hues are
+ * active.
+ */
+export const RingColors = [Palette.redOrange, Palette.orange, Palette.yellow, Palette.periwinkle] as const;
 
 export const Fonts = {
   regular: 'DMSans_400Regular',

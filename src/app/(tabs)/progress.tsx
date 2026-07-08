@@ -1,47 +1,61 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
 import { ContributionGrid } from '@/components/contribution-grid';
 import { GlowBackground } from '@/components/glow-background';
 import { LineChart } from '@/components/line-chart';
+import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WeekStreak } from '@/components/week-streak';
 import { BottomTabInset, Colors, MaxContentWidth, Palette, Spacing } from '@/constants/theme';
-import { buildMonthCells } from '@/lib/calendar';
-import {
-  exerciseNames,
-  plannedDates,
-  strengthSeries,
-  toDateKey,
-  weekStreak,
-} from '@/lib/store/derive';
+import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
 import type { ProgressPoint } from '@/lib/store/types';
+import { toDisplayVolume, toDisplayWeight, volumeUnitLabel, weightUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 
-type Range = 'week' | 'month' | 'year';
-const RANGE_LABELS: Record<Range, string> = { week: 'Week', month: 'Month', year: 'Year' };
+type MetricRange = 'week' | 'month' | 'all';
+const METRIC_RANGE_LABELS: Record<MetricRange, string> = { week: 'Week', month: 'Month', all: 'All time' };
 
 export default function ProgressScreen() {
-  const { sessions, bodyweight, steps } = useStore();
-  const [range, setRange] = useState<Range>('week');
+  const { sessions, cardioSessions, bodyweight, steps, waterEntries, preferences } = useStore();
+  const unitSystem = preferences.unitSystem;
+  const [metricRange, setMetricRange] = useState<MetricRange>('month');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
 
   const names = exerciseNames(sessions);
   const exercise = selectedExercise ?? names[0];
-  const strengthPoints = exercise ? strengthSeries(sessions, exercise) : [];
-  const stepsPoints: ProgressPoint[] = steps.slice(-30).map((entry) => ({ date: entry.date, value: entry.steps }));
-  const bodyweightPoints: ProgressPoint[] = bodyweight.map((entry) => ({ date: entry.date, value: entry.weight }));
+  const strengthPoints = filterPoints(exercise ? strengthSeries(sessions, exercise) : [], metricRange).map((point) => ({
+    ...point,
+    value: toDisplayWeight(point.value, unitSystem),
+  }));
+  const stepsPoints: ProgressPoint[] = filterPoints(
+    steps.map((entry) => ({ date: entry.date, value: entry.steps })),
+    metricRange,
+  );
+  const bodyweightPoints: ProgressPoint[] = filterPoints(
+    bodyweight.map((entry) => ({ date: entry.date, value: toDisplayWeight(entry.weight, unitSystem) })),
+    metricRange,
+  );
+  const calorieSources = [
+    ...sessions.map((s) => ({ date: s.date, calories: s.calories ?? 0 })),
+    ...cardioSessions.map((s) => ({ date: s.date, calories: s.calories ?? 0 })),
+  ];
+  const caloriePoints = filterPoints(aggregateByDate(calorieSources, (entry) => entry.calories), metricRange);
+  const cardioPoints = filterPoints(aggregateByDate(cardioSessions, (entry) => entry.minutes), metricRange);
+  const waterPoints = filterPoints(aggregateByDate(waterEntries, (entry) => entry.ounces), metricRange).map((point) => ({
+    ...point,
+    value: toDisplayVolume(point.value, unitSystem),
+  }));
 
   const chartWidth = contentWidth > 0 ? contentWidth - Spacing.three * 2 : 0;
 
   return (
-    <View style={styles.container}>
+    <TabFadeView style={styles.container}>
       <GlowBackground variant="cool" />
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView
@@ -50,31 +64,76 @@ export default function ProgressScreen() {
           onLayout={(event) => setContentWidth(Math.min(event.nativeEvent.layout.width, MaxContentWidth) - Spacing.four * 2)}>
           <View style={styles.headerRow}>
             <ThemedText type="subtitle">Progress</ThemedText>
-            <Dropdown
-              label={RANGE_LABELS[range]}
-              options={(['week', 'month', 'year'] as Range[]).map((r) => ({ id: r, label: RANGE_LABELS[r] }))}
-              onSelect={(id) => setRange(id as Range)}
-            />
           </View>
 
-          {range === 'week' && <WeekStreak days={weekStreak(sessions)} size={36} />}
-          {range === 'month' && <MonthGrid sessions={sessions} />}
-          {range === 'year' && contentWidth > 0 && (
-            <ContributionGrid sessions={sessions} width={contentWidth} />
+          {chartWidth > 0 && (
+            <>
+              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                DAY TRACKING
+              </ThemedText>
+              <ThemedView type="backgroundElement" style={styles.card}>
+                <StatHeader label="Workout activity" latest="Year to date" caption="daily sessions" />
+                <ContributionGrid sessions={sessions} cardioSessions={cardioSessions} width={chartWidth} />
+              </ThemedView>
+            </>
           )}
 
           <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
             TRACKING
           </ThemedText>
 
+          <View style={styles.metricRangeRow}>
+            <ThemedText type="small" themeColor="textSecondary">
+              Chart range
+            </ThemedText>
+            <Dropdown
+              label={METRIC_RANGE_LABELS[metricRange]}
+              options={(['week', 'month', 'all'] as MetricRange[]).map((r) => ({ id: r, label: METRIC_RANGE_LABELS[r] }))}
+              onSelect={(id) => setMetricRange(id as MetricRange)}
+            />
+          </View>
+
           {stepsPoints.length > 0 && (
             <ThemedView type="backgroundElement" style={styles.card}>
               <StatHeader
                 label="Steps"
                 latest={`${stepsPoints[stepsPoints.length - 1].value.toLocaleString()}`}
-                caption="last 30 days"
+                caption={METRIC_RANGE_LABELS[metricRange].toLowerCase()}
               />
               {chartWidth > 0 && <LineChart points={stepsPoints} width={chartWidth} color={Palette.yellow} />}
+            </ThemedView>
+          )}
+
+          {caloriePoints.length > 0 && (
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <StatHeader
+                label="Calories burned"
+                latest={`${caloriePoints[caloriePoints.length - 1].value} cal`}
+                caption={deltaCaption(caloriePoints, 'cal')}
+              />
+              {chartWidth > 0 && <LineChart points={caloriePoints} width={chartWidth} color={Palette.redOrange} />}
+            </ThemedView>
+          )}
+
+          {cardioPoints.length > 0 && (
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <StatHeader
+                label="Cardio"
+                latest={`${cardioPoints[cardioPoints.length - 1].value} min`}
+                caption={deltaCaption(cardioPoints, 'min')}
+              />
+              {chartWidth > 0 && <LineChart points={cardioPoints} width={chartWidth} color={Palette.yellow} />}
+            </ThemedView>
+          )}
+
+          {waterPoints.length > 0 && (
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <StatHeader
+                label="Water"
+                latest={`${waterPoints[waterPoints.length - 1].value} ${volumeUnitLabel(unitSystem)}`}
+                caption={deltaCaption(waterPoints, volumeUnitLabel(unitSystem))}
+              />
+              {chartWidth > 0 && <LineChart points={waterPoints} width={chartWidth} color={colors.accentLight} />}
             </ThemedView>
           )}
 
@@ -82,8 +141,8 @@ export default function ProgressScreen() {
             <ThemedView type="backgroundElement" style={styles.card}>
               <StatHeader
                 label="Body weight"
-                latest={`${bodyweightPoints[bodyweightPoints.length - 1].value} lbs`}
-                caption={deltaCaption(bodyweightPoints, 'lbs')}
+                latest={`${bodyweightPoints[bodyweightPoints.length - 1].value} ${weightUnitLabel(unitSystem)}`}
+                caption={deltaCaption(bodyweightPoints, weightUnitLabel(unitSystem))}
               />
               {chartWidth > 0 && <LineChart points={bodyweightPoints} width={chartWidth} color={Palette.periwinkle} />}
             </ThemedView>
@@ -98,6 +157,7 @@ export default function ProgressScreen() {
                 label={exercise ?? ''}
                 options={names.map((name) => ({ id: name, label: name }))}
                 onSelect={setSelectedExercise}
+                searchable
               />
             )}
           </View>
@@ -106,8 +166,8 @@ export default function ProgressScreen() {
             <ThemedView type="backgroundElement" style={styles.card}>
               <StatHeader
                 label={exercise!}
-                latest={`${strengthPoints[strengthPoints.length - 1].value} lbs`}
-                caption={deltaCaption(strengthPoints, 'lbs')}
+                latest={`${strengthPoints[strengthPoints.length - 1].value} ${weightUnitLabel(unitSystem)}`}
+                caption={deltaCaption(strengthPoints, weightUnitLabel(unitSystem))}
               />
               {chartWidth > 0 && <LineChart points={strengthPoints} width={chartWidth} color={Palette.orange} />}
             </ThemedView>
@@ -118,8 +178,26 @@ export default function ProgressScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </TabFadeView>
   );
+}
+
+function filterPoints(points: ProgressPoint[], range: MetricRange): ProgressPoint[] {
+  if (range === 'all') return points;
+  const start = new Date();
+  start.setDate(start.getDate() - (range === 'week' ? 6 : 29));
+  const startKey = toDateKey(start);
+  return points.filter((point) => point.date >= startKey);
+}
+
+function aggregateByDate<T extends { date: string }>(entries: T[], valueFor: (entry: T) => number): ProgressPoint[] {
+  const totals = new Map<string, number>();
+  for (const entry of entries) {
+    totals.set(entry.date, (totals.get(entry.date) ?? 0) + valueFor(entry));
+  }
+  return [...totals.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, value]) => ({ date, value }));
 }
 
 function deltaCaption(points: ProgressPoint[], unit: string): string {
@@ -153,91 +231,73 @@ function Dropdown({
   label,
   options,
   onSelect,
+  searchable = false,
 }: {
   label: string;
   options: { id: string; label: string }[];
   onSelect: (id: string) => void;
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const triggerRef = useRef<View>(null);
+  const { width: screenWidth } = useWindowDimensions();
+  const filtered = searchable
+    ? options.filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  const openMenu = () => {
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      setAnchor({ top: y + height + 6, right: screenWidth - (x + width) });
+      setOpen(true);
+    });
+  };
+
+  const closeMenu = () => {
+    setOpen(false);
+    setQuery('');
+  };
 
   return (
     <View style={styles.dropdown}>
-      <Pressable style={styles.dropdownTrigger} onPress={() => setOpen((o) => !o)}>
+      <Pressable ref={triggerRef} style={styles.dropdownTrigger} onPress={openMenu}>
         <ThemedText type="small">{label}</ThemedText>
         <SymbolView name={open ? 'chevron.up' : 'chevron.down'} size={11} tintColor={colors.textSecondary} />
       </Pressable>
-      {open && (
-        <View style={styles.dropdownMenu}>
-          {options.map((option, index) => (
-            <Pressable
-              key={option.id}
-              style={[styles.dropdownOption, index > 0 && styles.dropdownOptionDivider]}
-              onPress={() => {
-                onSelect(option.id);
-                setOpen(false);
-              }}>
-              <ThemedText type="small" themeColor={option.label === label ? 'accent' : 'text'}>
-                {option.label}
-              </ThemedText>
-            </Pressable>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function MonthGrid({ sessions }: { sessions: { date: string }[] }) {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const monthLabel = today.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-
-  const completedDates = new Set(sessions.map((session) => session.date));
-  const planned = plannedDates();
-  const rows = buildMonthCells(year, month);
-  const todaysKey = toDateKey(today);
-
-  return (
-    <View style={styles.monthGrid}>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.monthLabel}>
-        {monthLabel}
-      </ThemedText>
-      <View style={styles.weekdayRow}>
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((label, index) => (
-          <ThemedText key={index} type="small" themeColor="textSecondary" style={styles.weekdayLabel}>
-            {label}
-          </ThemedText>
-        ))}
-      </View>
-      {rows.map((row, rowIndex) => (
-        <View key={rowIndex} style={styles.weekRow}>
-          {row.map((day, dayIndex) => {
-            if (day === null) return <View key={dayIndex} style={styles.dayCell} />;
-
-            const dateKey = toDateKey(new Date(year, month, day));
-            const isCompleted = completedDates.has(dateKey);
-            const isPlanned = planned.has(dateKey);
-            const isToday = dateKey === todaysKey;
-
-            return (
-              <View key={dayIndex} style={styles.dayCell}>
-                <View
-                  style={[
-                    styles.dayBubble,
-                    isCompleted && { backgroundColor: colors.accent },
-                    isPlanned && !isCompleted && styles.dayBubblePlanned,
-                    isToday && !isCompleted && styles.dayBubbleToday,
-                  ]}>
-                  <ThemedText type="small" style={isCompleted ? styles.dayNumberCompleted : undefined}>
-                    {day}
+      {/* Rendered in a Modal (its own native overlay layer) so it always draws above the floating GlassTabBar, which lives outside this screen's view tree and ignores in-screen zIndex. */}
+      <Modal transparent visible={open} animationType="fade" onRequestClose={closeMenu}>
+        <Pressable style={styles.modalBackdrop} onPress={closeMenu} />
+        {anchor && (
+          <View style={[styles.dropdownMenu, { top: anchor.top, right: anchor.right }]}>
+            {searchable && (
+              <TextInput
+                style={styles.dropdownSearch}
+                placeholder="Search movement"
+                placeholderTextColor={colors.textSecondary}
+                value={query}
+                onChangeText={setQuery}
+                autoCapitalize="none"
+              />
+            )}
+            <ScrollView style={styles.dropdownScroll} keyboardShouldPersistTaps="handled">
+              {filtered.map((option, index) => (
+                <Pressable
+                  key={option.id}
+                  style={[styles.dropdownOption, index > 0 && styles.dropdownOptionDivider]}
+                  onPress={() => {
+                    onSelect(option.id);
+                    closeMenu();
+                  }}>
+                  <ThemedText type="small" themeColor={option.label === label ? 'accent' : 'text'}>
+                    {option.label}
                   </ThemedText>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      ))}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+      </Modal>
     </View>
   );
 }
@@ -263,18 +323,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    zIndex: 20,
   },
   sectionLabel: {
     textTransform: 'uppercase',
     letterSpacing: 0.4,
     marginTop: Spacing.two,
   },
+  metricRangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   strengthHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    zIndex: 10,
   },
   card: {
     borderRadius: Spacing.four,
@@ -292,7 +355,6 @@ const styles = StyleSheet.create({
   },
   dropdown: {
     position: 'relative',
-    zIndex: 30,
   },
   dropdownTrigger: {
     flexDirection: 'row',
@@ -305,16 +367,27 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
+  },
   dropdownMenu: {
     position: 'absolute',
-    top: '110%',
-    right: 0,
     minWidth: 160,
     borderRadius: Spacing.three,
     backgroundColor: '#1C1926',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     overflow: 'hidden',
+  },
+  dropdownSearch: {
+    minWidth: 220,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    color: colors.text,
+    backgroundColor: colors.backgroundSelected,
+  },
+  dropdownScroll: {
+    maxHeight: 220,
   },
   dropdownOption: {
     paddingHorizontal: Spacing.three,
@@ -323,46 +396,5 @@ const styles = StyleSheet.create({
   dropdownOptionDivider: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-  },
-  monthGrid: {
-    gap: Spacing.one,
-  },
-  monthLabel: {
-    marginBottom: Spacing.one,
-  },
-  weekdayRow: {
-    flexDirection: 'row',
-  },
-  weekdayLabel: {
-    flex: 1,
-    textAlign: 'center',
-  },
-  weekRow: {
-    flexDirection: 'row',
-  },
-  dayCell: {
-    flex: 1,
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayBubble: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayBubblePlanned: {
-    borderWidth: 2,
-    borderColor: colors.accent,
-    borderStyle: 'dashed',
-  },
-  dayBubbleToday: {
-    borderWidth: 2,
-    borderColor: colors.accentLight,
-  },
-  dayNumberCompleted: {
-    color: colors.background,
   },
 });

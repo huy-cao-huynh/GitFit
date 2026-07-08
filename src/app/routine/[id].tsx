@@ -12,11 +12,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
+import { ScheduleDaySelector } from '@/components/schedule-day-selector';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Destructive, MaxContentWidth, Spacing } from '@/constants/theme';
-import { makeId } from '@/lib/store/storage';
-import type { Routine, RoutineExercise } from '@/lib/store/types';
+import { makeId } from '@/lib/store/id';
+import type { ExerciseKind, Routine, RoutineExercise, Weekday } from '@/lib/store/types';
+import { fromDisplayWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -24,26 +26,43 @@ const colors = Colors;
 interface DraftExercise {
   id: string;
   name: string;
+  kind: ExerciseKind;
   sets: number;
   targetReps: number;
   targetWeight: number;
+  targetDurationSec: number;
   lastTime: RoutineExercise['lastTime'];
 }
 
 function blankExercise(): DraftExercise {
-  return { id: makeId(), name: '', sets: 3, targetReps: 10, targetWeight: 0, lastTime: null };
+  return {
+    id: makeId(),
+    name: '',
+    kind: 'reps',
+    sets: 3,
+    targetReps: 10,
+    targetWeight: 0,
+    targetDurationSec: 45,
+    lastTime: null,
+  };
 }
 
 export default function RoutineEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { routines, addRoutine, updateRoutine, deleteRoutine } = useStore();
+  const { routines, addRoutine, updateRoutine, deleteRoutine, preferences } = useStore();
+  const unitSystem = preferences.unitSystem;
 
   const isNew = id === 'new';
   const existing = isNew ? undefined : routines.find((routine) => routine.id === id);
 
   const [name, setName] = useState(existing?.name ?? '');
+  const [scheduledDays, setScheduledDays] = useState<Weekday[]>(existing?.scheduledDays ?? []);
   const [exercises, setExercises] = useState<DraftExercise[]>(
-    existing?.exercises.map((exercise) => ({ ...exercise })) ?? [blankExercise()],
+    existing?.exercises.map((exercise) => ({
+      ...exercise,
+      kind: exercise.kind ?? 'reps',
+      targetDurationSec: exercise.targetDurationSec ?? 45,
+    })) ?? [blankExercise()],
   );
 
   const validExercises = exercises.filter((exercise) => exercise.name.trim().length > 0);
@@ -60,10 +79,12 @@ export default function RoutineEditorScreen() {
     const totalSets = validExercises.reduce((sum, exercise) => sum + exercise.sets, 0);
     const routine: Routine = {
       id: existing?.id ?? makeId(),
+      category: 'strength',
       name: name.trim(),
       level: existing?.level ?? 'Custom',
       durationMinutes: Math.max(10, Math.round((totalSets * 3) / 5) * 5),
       tileColor: existing?.tileColor ?? 'rgba(118,120,237,0.25)',
+      scheduledDays,
       exercises: validExercises.map((exercise) => ({ ...exercise, name: exercise.name.trim() })),
     };
     if (existing) {
@@ -109,6 +130,8 @@ export default function RoutineEditorScreen() {
               onChangeText={setName}
             />
 
+            <ScheduleDaySelector selectedDays={scheduledDays} onChange={setScheduledDays} />
+
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
               EXERCISES
             </ThemedText>
@@ -133,6 +156,10 @@ export default function RoutineEditorScreen() {
                 </View>
 
                 <View style={styles.stepperRow}>
+                  <ModeToggle
+                    kind={exercise.kind}
+                    onChange={(kind) => patchExercise(exercise.id, { kind })}
+                  />
                   <Stepper
                     label="Sets"
                     value={exercise.sets}
@@ -140,20 +167,36 @@ export default function RoutineEditorScreen() {
                     step={1}
                     onChange={(sets) => patchExercise(exercise.id, { sets })}
                   />
-                  <Stepper
-                    label="Reps"
-                    value={exercise.targetReps}
-                    min={1}
-                    step={1}
-                    onChange={(targetReps) => patchExercise(exercise.id, { targetReps })}
-                  />
-                  <Stepper
-                    label="Weight"
-                    value={exercise.targetWeight}
-                    min={0}
-                    step={5}
-                    onChange={(targetWeight) => patchExercise(exercise.id, { targetWeight })}
-                  />
+                  {exercise.kind === 'time' ? (
+                    <Stepper
+                      label="Time"
+                      value={exercise.targetDurationSec}
+                      min={5}
+                      step={5}
+                      suffix="sec"
+                      onChange={(targetDurationSec) => patchExercise(exercise.id, { targetDurationSec })}
+                    />
+                  ) : (
+                    <>
+                      <Stepper
+                        label="Reps"
+                        value={exercise.targetReps}
+                        min={1}
+                        step={1}
+                        onChange={(targetReps) => patchExercise(exercise.id, { targetReps })}
+                      />
+                      <Stepper
+                        label="Weight"
+                        value={toDisplayWeight(exercise.targetWeight, unitSystem)}
+                        min={0}
+                        step={unitSystem === 'metric' ? 1 : 2.5}
+                        suffix={weightUnitLabel(unitSystem)}
+                        onChange={(displayWeight) =>
+                          patchExercise(exercise.id, { targetWeight: fromDisplayWeight(displayWeight, unitSystem) })
+                        }
+                      />
+                    </>
+                  )}
                 </View>
               </ThemedView>
             ))}
@@ -186,12 +229,14 @@ function Stepper({
   value,
   min,
   step,
+  suffix,
   onChange,
 }: {
   label: string;
   value: number;
   min: number;
   step: number;
+  suffix?: string;
   onChange: (value: number) => void;
 }) {
   return (
@@ -208,11 +253,37 @@ function Stepper({
         </Pressable>
         <ThemedText type="smallBold" style={styles.stepperValue}>
           {value}
+          {suffix ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              {' '}
+              {suffix}
+            </ThemedText>
+          ) : null}
         </ThemedText>
         <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(value + step)}>
           <SymbolView name="plus" size={12} tintColor={colors.text} />
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+function ModeToggle({ kind, onChange }: { kind: ExerciseKind; onChange: (kind: ExerciseKind) => void }) {
+  return (
+    <View style={styles.modeToggle}>
+      {(['reps', 'time'] as ExerciseKind[]).map((option) => {
+        const active = kind === option;
+        return (
+          <Pressable
+            key={option}
+            style={[styles.modeButton, active && styles.modeButtonActive]}
+            onPress={() => onChange(option)}>
+            <ThemedText type="smallBold" style={active ? styles.modeTextActive : undefined}>
+              {option === 'reps' ? 'Reps' : 'Time'}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -273,7 +344,28 @@ const styles = StyleSheet.create({
   },
   stepperRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  modeToggle: {
+    width: '100%',
+    flexDirection: 'row',
+    borderRadius: Spacing.three,
+    backgroundColor: colors.backgroundSelected,
+    padding: Spacing.half,
+  },
+  modeButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.accent,
+  },
+  modeTextActive: {
+    color: colors.background,
   },
   stepper: {
     alignItems: 'center',

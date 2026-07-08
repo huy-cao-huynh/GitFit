@@ -11,8 +11,8 @@ MVP roadmap (in priority order):
 2. ✅ Workout logging: custom routines (create/edit in the Workouts tab), per-set reps/weight logging with sliders, rest timer, drag-reorder queue mid-session — done (local store)
 3. ✅ History list with per-set detail + calendar (merged into Progress: week/month/year views) — done (local store)
 4. ✅ Progress: strength graphs per movement + body-weight and steps tracking — done (steps are seeded data until HealthKit)
-5. Supabase tables + RLS to replace the local AsyncStorage store (`src/lib/store/`)
-6. Apple Health / calorie sync (settings toggle is a disabled placeholder; steps series is seeded until then)
+5. ✅ Supabase tables + RLS replacing the local AsyncStorage store — done (`supabase/migrations/`, `src/lib/store/remote.ts`)
+6. Apple Health / calorie sync (settings toggle is a disabled placeholder; the steps series stays empty until then)
 
 # Architecture
 
@@ -24,12 +24,12 @@ MVP roadmap (in priority order):
 - `history/[id].tsx`: per-session detail (sets × reps × weight + duration/calories).
 - `routine/[id].tsx` (modal): create (`id === 'new'`) / edit / delete routines.
 - `goals.tsx` (modal): weekly targets + daily check-off definitions; reachable from the dashboard Today section and Settings.
-- **Data layer**: `StoreProvider` / `useStore()` (`src/providers/store-provider.tsx`) over AsyncStorage (`src/lib/store/{types,storage,seed,derive}.ts`), seeded on first run, shaped like the future Supabase tables. Pure selectors live in `derive.ts` — screens stay declarative. Storage keys are versioned `gymapp/v1/*`.
+- **Data layer**: `StoreProvider` / `useStore()` (`src/providers/store-provider.tsx`) hydrates the whole per-user dataset from Supabase on login (`fetchStoreData` in `src/lib/store/remote.ts`) and mirrors each mutator with a fire-and-forget remote write after an optimistic in-memory update — screens never talk to Supabase directly. App types live in `src/lib/store/types.ts` (camelCase) and map 1:1 to the snake_case tables in `supabase/migrations/0001_initial_schema.sql`. Pure selectors live in `derive.ts` — screens stay declarative. Row ids are client-generated UUIDs (`makeId` in `src/lib/store/id.ts`, via `expo-crypto`). First login writes default goals (`src/lib/store/seed.ts`); everything else starts empty.
 - Auth state: `useAuth()` from `src/providers/auth-provider.tsx` (also `updateProfile`/`updateEmail`/`updatePassword`; name & birthday live in Supabase `user_metadata`). Supabase client: `src/lib/supabase.ts`.
 
 # Integrations
 
-- **Supabase**: auth + profile metadata today; workout/goal data is in the local AsyncStorage store (`src/lib/store/`) — wiring real per-user tables + RLS is the next step (the store types are the table shapes). Credentials come from `.env` (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`). Never commit `.env`; update `.env.example` when adding new vars. Restart the dev server after changing `.env`.
+- **Supabase**: auth, profile metadata, and all workout/goal/health data (per-user tables with RLS; schema in `supabase/migrations/`, applied via the dashboard SQL editor). Every table keys rows on `user_id default auth.uid()` with select/insert/update/delete policies scoped to the owner, so the client never sends `user_id`. Credentials come from `.env` (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`). Never commit `.env`; update `.env.example` when adding new vars. Restart the dev server after changing `.env`.
 - **Google login**: browser OAuth via `expo-web-browser` + `supabase.auth.signInWithOAuth` (see `signInWithGoogle` in the auth provider). Redirect URLs must be registered in the Supabase dashboard.
 - **Apple Health**: not integrated yet; will require a dev build (not Expo Go) when added. The Progress "Steps" series reads `StepsEntry[]` from the store — HealthKit will fill the same interface.
 

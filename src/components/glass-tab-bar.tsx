@@ -2,19 +2,19 @@ import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Fonts, Spacing } from '@/constants/theme';
 
-const BAR_HEIGHT = 60;
-const INDICATOR_WIDTH = 52;
+const BAR_HEIGHT = 56;
+const INDICATOR_WIDTH = 64;
 const INDICATOR_HEIGHT = 44;
-const SPRING = { damping: 18, stiffness: 180 };
+const SLIDE = { duration: 160 };
 
 const TAB_ICONS: Record<string, SFSymbol> = {
   dashboard: 'house.fill',
-  history: 'clock',
+  logging: 'target',
   progress: 'chart.line.uptrend.xyaxis',
   workouts: 'dumbbell',
   settings: 'gearshape',
@@ -22,7 +22,7 @@ const TAB_ICONS: Record<string, SFSymbol> = {
 
 /**
  * Floating dark pill replacing the native tab bar, with a periwinkle
- * indicator that springs between tabs.
+ * indicator that shifts directly between tabs.
  */
 export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -33,8 +33,8 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
   useEffect(() => {
     if (cellWidth === 0) return;
     const target = state.index * cellWidth + (cellWidth - INDICATOR_WIDTH) / 2;
-    // First layout jumps into place; later changes spring.
-    indicatorX.value = indicatorX.value < 0 ? target : withSpring(target, SPRING);
+    // First layout jumps into place; later changes glide without bounce.
+    indicatorX.value = indicatorX.value < 0 ? target : withTiming(target, SLIDE);
   }, [state.index, cellWidth, indicatorX]);
 
   const indicatorStyle = useAnimatedStyle(() => ({
@@ -85,8 +85,8 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
 const styles = StyleSheet.create({
   bar: {
     position: 'absolute',
-    left: Spacing.four,
-    right: Spacing.four,
+    left: Spacing.three,
+    right: Spacing.three,
     height: BAR_HEIGHT,
     borderRadius: BAR_HEIGHT / 2,
     backgroundColor: 'rgba(20,17,30,0.94)',

@@ -8,35 +8,22 @@ import {
   type PropsWithChildren,
 } from 'react';
 
-import {
-  buildSeedCheckoffLog,
-  buildSeedSessions,
-  buildSeedSteps,
-  seedBodyweight,
-  seedCheckoffDefs,
-  seedGoals,
-  seedRoutines,
-} from '@/lib/store/seed';
-import { loadJSON, saveJSON, saveJSONAsync, StorageKeys } from '@/lib/store/storage';
+import * as remote from '@/lib/store/remote';
+import { seedGoals, seedPreferences } from '@/lib/store/seed';
 import type {
   BodyweightEntry,
+  CardioSession,
   CheckoffDef,
-  CheckoffLog,
   Goals,
+  MeasurementDef,
+  MeasurementEntry,
+  Preferences,
   Routine,
   Session,
-  StepsEntry,
+  StoreData,
+  WaterEntry,
 } from '@/lib/store/types';
-
-interface StoreData {
-  routines: Routine[];
-  sessions: Session[];
-  goals: Goals;
-  checkoffDefs: CheckoffDef[];
-  checkoffLog: CheckoffLog;
-  bodyweight: BodyweightEntry[];
-  steps: StepsEntry[];
-}
+import { useAuth } from '@/providers/auth-provider';
 
 interface StoreValue extends StoreData {
   isHydrated: boolean;
@@ -44,92 +31,90 @@ interface StoreValue extends StoreData {
   updateRoutine: (routine: Routine) => void;
   deleteRoutine: (id: string) => void;
   addSession: (session: Session) => void;
+  addCardioSession: (session: CardioSession) => void;
   setGoals: (goals: Goals) => void;
   setCheckoffDefs: (defs: CheckoffDef[]) => void;
   toggleCheckoff: (date: string, defId: string) => void;
   addBodyweight: (entry: BodyweightEntry) => void;
+  addWaterEntry: (entry: WaterEntry) => void;
+  setMeasurementDefs: (defs: MeasurementDef[]) => void;
+  addMeasurementEntry: (entry: MeasurementEntry) => void;
+  setPreferences: (preferences: Preferences) => void;
 }
 
 const EMPTY: StoreData = {
   routines: [],
   sessions: [],
+  cardioSessions: [],
   goals: seedGoals,
   checkoffDefs: [],
   checkoffLog: {},
   bodyweight: [],
   steps: [],
+  waterEntries: [],
+  measurementDefs: [],
+  measurementEntries: [],
+  preferences: seedPreferences,
 };
 
 const StoreContext = createContext<StoreValue | null>(null);
 
-function buildSeedData(): StoreData {
-  const sessions = buildSeedSessions();
-  return {
-    routines: seedRoutines,
-    sessions,
-    goals: seedGoals,
-    checkoffDefs: seedCheckoffDefs,
-    checkoffLog: buildSeedCheckoffLog(sessions),
-    bodyweight: seedBodyweight,
-    steps: buildSeedSteps(),
-  };
+/** Fire-and-forget remote write: optimistic UI state is already updated. */
+function persist(label: string, write: Promise<void>): void {
+  write.catch((error) => {
+    console.warn(`Failed to persist ${label} to Supabase`, error);
+  });
+}
+
+/** Hydrated store tagged with its owner, so stale data never leaks across a
+ * logout/login — a mismatched userId reads as "not hydrated yet". */
+interface LoadedData {
+  userId: string;
+  data: StoreData;
 }
 
 export function StoreProvider({ children }: PropsWithChildren) {
-  const [data, setData] = useState<StoreData | null>(null);
+  const { session } = useAuth();
+  const userId = session?.user.id ?? null;
+  const [loaded, setLoaded] = useState<LoadedData | null>(null);
+  const data = loaded && loaded.userId === userId ? loaded.data : null;
 
+  // Hydrate from Supabase whenever a user logs in.
   useEffect(() => {
+    if (!userId) return;
+
     let cancelled = false;
 
     (async () => {
-      const seeded = await loadJSON<boolean>(StorageKeys.seeded);
-      if (!seeded) {
-        const initial = buildSeedData();
-        await Promise.all(
-          (Object.keys(initial) as (keyof StoreData)[]).map((key) =>
-            saveJSONAsync(StorageKeys[key], initial[key]),
-          ),
-        );
-        // Written after the data so a crash mid-seed retries next launch.
-        await saveJSONAsync(StorageKeys.seeded, true);
-        if (!cancelled) setData(initial);
-        return;
+      try {
+        const fetched = await remote.fetchStoreData();
+        // First login: no goals yet, so write the defaults up-front.
+        if (fetched.goals.length === 0) {
+          fetched.goals = seedGoals;
+          persist('default goals', remote.seedDefaultGoals(seedGoals));
+        }
+        if (!cancelled) setLoaded({ userId, data: fetched });
+      } catch (error) {
+        console.warn('Failed to hydrate store from Supabase', error);
+        // Unblock the UI with an empty store; writes made in this state still
+        // go to Supabase and a restart re-hydrates the full dataset.
+        if (!cancelled) setLoaded({ userId, data: EMPTY });
       }
-
-      const [routines, sessions, goals, checkoffDefs, checkoffLog, bodyweight, steps] =
-        await Promise.all([
-          loadJSON<Routine[]>(StorageKeys.routines),
-          loadJSON<Session[]>(StorageKeys.sessions),
-          loadJSON<Goals>(StorageKeys.goals),
-          loadJSON<CheckoffDef[]>(StorageKeys.checkoffDefs),
-          loadJSON<CheckoffLog>(StorageKeys.checkoffLog),
-          loadJSON<BodyweightEntry[]>(StorageKeys.bodyweight),
-          loadJSON<StepsEntry[]>(StorageKeys.steps),
-        ]);
-      if (cancelled) return;
-      setData({
-        routines: routines ?? [],
-        sessions: sessions ?? [],
-        goals: goals ?? seedGoals,
-        checkoffDefs: checkoffDefs ?? [],
-        checkoffLog: checkoffLog ?? {},
-        bodyweight: bodyweight ?? [],
-        steps: steps ?? [],
-      });
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId]);
 
   const apply = useCallback(
     <K extends keyof StoreData>(key: K, updater: (current: StoreData[K]) => StoreData[K]) => {
-      setData((previous) => {
+      setLoaded((previous) => {
         if (!previous) return previous;
-        const nextValue = updater(previous[key]);
-        saveJSON(StorageKeys[key], nextValue);
-        return { ...previous, [key]: nextValue };
+        return {
+          ...previous,
+          data: { ...previous.data, [key]: updater(previous.data[key]) },
+        };
       });
     },
     [],
@@ -138,23 +123,79 @@ export function StoreProvider({ children }: PropsWithChildren) {
   const value = useMemo<StoreValue>(
     () => ({
       ...(data ?? EMPTY),
-      isHydrated: data !== null,
-      addRoutine: (routine) => apply('routines', (routines) => [...routines, routine]),
-      updateRoutine: (routine) =>
-        apply('routines', (routines) => routines.map((r) => (r.id === routine.id ? routine : r))),
-      deleteRoutine: (id) => apply('routines', (routines) => routines.filter((r) => r.id !== id)),
-      addSession: (session) => apply('sessions', (sessions) => [session, ...sessions]),
-      setGoals: (goals) => apply('goals', () => goals),
-      setCheckoffDefs: (defs) => apply('checkoffDefs', () => defs),
-      toggleCheckoff: (date, defId) =>
+      // Logged out there is nothing to hydrate; the auth guard shows login.
+      isHydrated: userId === null || data !== null,
+      addRoutine: (routine) => {
+        apply('routines', (routines) => [...routines, routine]);
+        persist('routine', remote.insertRoutine(routine));
+      },
+      updateRoutine: (routine) => {
+        apply('routines', (routines) => routines.map((r) => (r.id === routine.id ? routine : r)));
+        persist('routine', remote.updateRoutine(routine));
+      },
+      deleteRoutine: (id) => {
+        apply('routines', (routines) => routines.filter((r) => r.id !== id));
+        persist('routine delete', remote.deleteRoutine(id));
+      },
+      addSession: (session) => {
+        apply('sessions', (sessions) => [session, ...sessions]);
+        persist('session', remote.insertSession(session));
+      },
+      addCardioSession: (session) => {
+        apply('cardioSessions', (cardioSessions) => [session, ...cardioSessions]);
+        persist('cardio session', remote.insertCardioSession(session));
+      },
+      setGoals: (goals) => {
+        apply('goals', () => goals);
+        persist('goals', remote.setGoals(goals));
+      },
+      setCheckoffDefs: (defs) => {
+        apply('checkoffDefs', () => defs);
+        persist('check-off defs', remote.setCheckoffDefs(defs));
+      },
+      toggleCheckoff: (date, defId) => {
+        const checked = !(data?.checkoffLog[date] ?? []).includes(defId);
         apply('checkoffLog', (log) => {
           const day = log[date] ?? [];
           const next = day.includes(defId) ? day.filter((id) => id !== defId) : [...day, defId];
           return { ...log, [date]: next };
-        }),
-      addBodyweight: (entry) => apply('bodyweight', (entries) => [...entries, entry]),
+        });
+        persist('check-off', remote.setCheckoff(date, defId, checked));
+      },
+      addBodyweight: (entry) => {
+        apply('bodyweight', (entries) =>
+          [...entries.filter((existing) => existing.date !== entry.date), entry].sort((a, b) =>
+            a.date.localeCompare(b.date),
+          ),
+        );
+        persist('bodyweight', remote.upsertBodyweight(entry));
+      },
+      addWaterEntry: (entry) => {
+        apply('waterEntries', (entries) =>
+          [entry, ...entries.filter((existing) => existing.id !== entry.id)].sort((a, b) =>
+            b.date.localeCompare(a.date),
+          ),
+        );
+        persist('water entry', remote.insertWaterEntry(entry));
+      },
+      setMeasurementDefs: (defs) => {
+        apply('measurementDefs', () => defs);
+        persist('measurement defs', remote.setMeasurementDefs(defs));
+      },
+      addMeasurementEntry: (entry) => {
+        apply('measurementEntries', (entries) =>
+          [entry, ...entries.filter((existing) => existing.id !== entry.id)].sort((a, b) =>
+            b.date.localeCompare(a.date),
+          ),
+        );
+        persist('measurement entry', remote.insertMeasurementEntry(entry));
+      },
+      setPreferences: (preferences) => {
+        apply('preferences', () => preferences);
+        if (userId) persist('preferences', remote.updatePreferences(userId, preferences));
+      },
     }),
-    [data, apply],
+    [data, apply, userId],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

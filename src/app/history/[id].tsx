@@ -101,14 +101,32 @@ function ExerciseCard({ exercise }: { exercise: SessionExercise }) {
           <ThemedText type="small" themeColor="textSecondary" style={styles.setNumber}>
             Set {index + 1}
           </ThemedText>
-          <ThemedText type="small">{set.reps} reps</ThemedText>
+          <ThemedText type="small">{formatSetValue(set)}</ThemedText>
           <ThemedText type="small" style={styles.setWeight}>
-            {set.weight > 0 ? `${set.weight} lbs` : 'bodyweight'}
+            {formatSetDetail(set)}
           </ThemedText>
         </View>
       ))}
     </ThemedView>
   );
+}
+
+function formatSetValue(set: { reps?: number; durationSec?: number; skipped?: boolean }) {
+  if (set.skipped) return 'Skipped';
+  if (set.durationSec !== undefined) return formatDuration(set.durationSec);
+  return `${set.reps ?? 0} reps`;
+}
+
+function formatSetDetail(set: { weight?: number; durationSec?: number; skipped?: boolean }) {
+  if (set.skipped) return '';
+  if (set.durationSec !== undefined) return 'time';
+  return (set.weight ?? 0) > 0 ? `${set.weight} lbs` : 'bodyweight';
+}
+
+function formatDuration(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({

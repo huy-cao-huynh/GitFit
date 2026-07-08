@@ -8,14 +8,14 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { Colors, Spacing } from '@/constants/theme';
 
-const SPRING = { damping: 20, stiffness: 220 };
+const REORDER_TIMING = { duration: 120 };
 
 interface SortableListProps<T> {
   items: T[];
@@ -28,7 +28,7 @@ interface SortableListProps<T> {
 
 /**
  * Drag-handle reorderable list for short, non-scrolling lists (the session
- * queue). Rows are absolutely positioned and spring to their slot.
+ * queue). Rows are absolutely positioned and animate to their slot.
  */
 export function SortableList<T>({ items, keyFor, rowHeight, renderRow, onOrderChange }: SortableListProps<T>) {
   const positions = useSharedValue<Record<string, number>>(
@@ -49,10 +49,11 @@ export function SortableList<T>({ items, keyFor, rowHeight, renderRow, onOrderCh
 
   return (
     <View style={{ height: items.length * rowHeight }}>
-      {items.map((item) => (
+      {items.map((item, index) => (
         <SortableRow
           key={keyFor(item)}
           id={keyFor(item)}
+          initialIndex={index}
           positions={positions}
           rowHeight={rowHeight}
           count={items.length}
@@ -66,6 +67,7 @@ export function SortableList<T>({ items, keyFor, rowHeight, renderRow, onOrderCh
 
 function SortableRow({
   id,
+  initialIndex,
   positions,
   rowHeight,
   count,
@@ -73,6 +75,7 @@ function SortableRow({
   children,
 }: {
   id: string;
+  initialIndex: number;
   positions: SharedValue<Record<string, number>>;
   rowHeight: number;
   count: number;
@@ -81,13 +84,13 @@ function SortableRow({
 }) {
   const isActive = useSharedValue(false);
   const startY = useSharedValue(0);
-  const translateY = useSharedValue((positions.value[id] ?? 0) * rowHeight);
+  const translateY = useSharedValue(initialIndex * rowHeight);
 
   useAnimatedReaction(
     () => positions.value[id],
     (position) => {
       if (position === undefined || isActive.value) return;
-      translateY.value = withSpring(position * rowHeight, SPRING);
+      translateY.value = withTiming(position * rowHeight, REORDER_TIMING);
     },
   );
 
@@ -114,7 +117,7 @@ function SortableRow({
     })
     .onEnd(() => {
       isActive.value = false;
-      translateY.value = withSpring((positions.value[id] ?? 0) * rowHeight, SPRING);
+      translateY.value = withTiming((positions.value[id] ?? 0) * rowHeight, REORDER_TIMING);
       scheduleOnRN(onCommit);
     });
 

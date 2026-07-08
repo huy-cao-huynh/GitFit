@@ -7,31 +7,59 @@ import { SymbolView } from 'expo-symbols';
 import { ActivityRings } from '@/components/activity-rings';
 import { Chevron } from '@/components/chevron';
 import { GlowBackground } from '@/components/glow-background';
+import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
-import { WeekStreak } from '@/components/week-streak';
+import { WaterBottle } from '@/components/water-bottle';
 import { BottomTabInset, Colors, MaxContentWidth, RingColors, Spacing } from '@/constants/theme';
-import { todayKey, todayPlan, weeklyProgress, weekStreak } from '@/lib/store/derive';
+import { currentGoalValue, scheduledRoutineTasks, todayKey, todayWaterOunces } from '@/lib/store/derive';
+import { makeId } from '@/lib/store/id';
+import type { GoalDef } from '@/lib/store/types';
+import { fromDisplayVolume, toDisplayVolume, volumeUnitLabel } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
+const WATER_QUICK_ADD_IMPERIAL = 16;
+const WATER_QUICK_ADD_METRIC = 500;
 
 export default function DashboardScreen() {
   const { session } = useAuth();
-  const { routines, sessions, goals, checkoffDefs, checkoffLog, toggleCheckoff } = useStore();
-  const name = session?.user.email?.split('@')[0] ?? 'there';
+  const {
+    routines,
+    sessions,
+    cardioSessions,
+    goals,
+    checkoffDefs,
+    checkoffLog,
+    waterEntries,
+    addWaterEntry,
+    toggleCheckoff,
+    preferences,
+  } = useStore();
+  const metadata = session?.user.user_metadata ?? {};
+  const name = (metadata.full_name as string | undefined)?.trim() || session?.user.email?.split('@')[0] || 'there';
 
-  const week = weekStreak(sessions);
-  const progress = weeklyProgress(sessions);
-  const plan = todayPlan(routines, sessions);
+  const unitSystem = preferences.unitSystem;
   const today = todayKey();
   const doneToday = checkoffLog[today] ?? [];
+  const scheduledTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, today);
+
+  const waterGoal = goals.find((goal) => goal.type === 'water');
+  const todayWater = todayWaterOunces(waterEntries);
+  const dailyWaterTarget = waterGoal ? Math.max(1, Math.round(waterGoal.target / 7)) : 0;
+  const ringSize = waterGoal ? 168 : 240;
+  const ringStrokeWidth = waterGoal ? 13 : 16;
+  const ringGap = waterGoal ? 5 : 6;
+
+  const addWater = (displayAmount: number) => {
+    addWaterEntry({ id: makeId(), date: today, ounces: Math.round(fromDisplayVolume(displayAmount, unitSystem)) });
+  };
 
   return (
-    <View style={styles.container}>
+    <TabFadeView style={styles.container}>
       <GlowBackground variant="home" />
       <SafeAreaView edges={['top']} style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <ThemedText type="subtitle">Hey, {name}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
@@ -39,78 +67,44 @@ export default function DashboardScreen() {
             </ThemedText>
           </View>
 
-          <WeekStreak days={week} />
-
-          <Pressable style={styles.ringsArea} onPress={() => router.navigate('/workouts')}>
-            <ActivityRings
-              size={240}
-              strokeWidth={16}
-              gap={6}
-              rings={[
-                { progress: progress.calories / goals.calories, color: RingColors[0], trackColor: colors.backgroundSelected },
-                { progress: progress.workoutsPerWeek / goals.workoutsPerWeek, color: RingColors[1], trackColor: colors.backgroundSelected },
-                { progress: progress.cardioMinutes / goals.cardioMinutes, color: RingColors[2], trackColor: colors.backgroundSelected },
-              ]}
-            />
-          </Pressable>
-
-          <View style={styles.ringsLegend}>
-            <LegendStat color={RingColors[0]} value={progress.calories} goal={goals.calories} label="cal" />
-            <LegendStat color={RingColors[1]} value={progress.workoutsPerWeek} goal={goals.workoutsPerWeek} label="workouts" />
-            <LegendStat color={RingColors[2]} value={progress.cardioMinutes} goal={goals.cardioMinutes} label="min cardio" />
-          </View>
-
-          <Pressable style={styles.startButton} onPress={() => router.push('/workout/choose')}>
-            <Svg width={14} height={16} viewBox="0 0 14 16">
-              <Path d="M0 0l14 8-14 8z" fill={colors.background} />
-            </Svg>
-            <ThemedText type="subtitle" style={styles.startButtonText}>
-              Start Workout
-            </ThemedText>
-          </Pressable>
-
           <View style={styles.todaySection}>
             <View style={styles.sectionHeader}>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
                 TODAY
               </ThemedText>
-              <Pressable hitSlop={8} onPress={() => router.push('/goals')}>
+              <Pressable hitSlop={8} onPress={() => router.push('/logging')}>
                 <ThemedText type="small" style={{ color: colors.accent }}>
                   Edit
                 </ThemedText>
               </Pressable>
             </View>
 
-            {plan.status === 'completed' && (
-              <View style={styles.todayRow}>
-                <View style={[styles.todayIcon, { backgroundColor: colors.accent }]}>
-                  <SymbolView name="checkmark" size={14} tintColor={colors.background} />
-                </View>
-                <View style={styles.todayText}>
-                  <ThemedText type="smallBold">{plan.session.routineName}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    Completed · {plan.session.durationMinutes} min
-                  </ThemedText>
-                </View>
-              </View>
-            )}
+            {scheduledTasks.map((task) => {
+              const path =
+                task.routine.category === 'cardio'
+                  ? { pathname: '/cardio/[id]' as const, params: { id: task.routine.id } }
+                  : { pathname: '/workout/[id]' as const, params: { id: task.routine.id } };
+              return (
+                <Pressable
+                  key={task.routine.id}
+                  style={styles.todayRow}
+                  onPress={() => router.push(path)}
+                  disabled={task.completed}>
+                  <View style={[styles.checkCircle, task.completed ? styles.checkCircleDone : styles.checkCircleTodo]}>
+                    {task.completed && <SymbolView name="checkmark" size={12} tintColor={colors.background} />}
+                  </View>
+                  <View style={styles.todayText}>
+                    <ThemedText type="smallBold">{task.routine.name}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {task.completed ? 'Completed today' : `${task.routine.durationMinutes} min · ${task.routine.level}`}
+                    </ThemedText>
+                  </View>
+                  {!task.completed && <Chevron color={colors.textSecondary} />}
+                </Pressable>
+              );
+            })}
 
-            {plan.status === 'planned' && (
-              <Pressable style={styles.todayRow} onPress={() => router.push(`/workout/${plan.routine.id}`)}>
-                <View style={[styles.todayIcon, { backgroundColor: plan.routine.tileColor }]}>
-                  <SymbolView name="dumbbell" size={15} tintColor={colors.accent} />
-                </View>
-                <View style={styles.todayText}>
-                  <ThemedText type="smallBold">{plan.routine.name}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {plan.routine.durationMinutes} min · {plan.routine.level}
-                  </ThemedText>
-                </View>
-                <Chevron color={colors.textSecondary} />
-              </Pressable>
-            )}
-
-            {plan.status === 'rest' && (
+            {scheduledTasks.length === 0 && checkoffDefs.length === 0 && (
               <View style={styles.todayRow}>
                 <View style={[styles.todayIcon, { backgroundColor: colors.backgroundSelected }]}>
                   <SymbolView name="moon.zzz" size={15} tintColor={colors.accentLight} />
@@ -144,20 +138,100 @@ export default function DashboardScreen() {
               );
             })}
           </View>
+
+          <View style={styles.ringsRow}>
+            <Pressable onPress={() => router.navigate('/logging')}>
+              <ActivityRings
+                animated
+                size={ringSize}
+                strokeWidth={ringStrokeWidth}
+                gap={ringGap}
+                rings={goals.map((goal, index) => ({
+                  progress: currentGoalValue(goal, sessions, cardioSessions, waterEntries) / goal.target,
+                  color: RingColors[index % RingColors.length],
+                  trackColor: colors.backgroundSelected,
+                }))}
+              />
+            </Pressable>
+
+            {waterGoal && (
+              <View style={styles.waterWidget}>
+                <WaterBottle progress={todayWater / (dailyWaterTarget || 1)} size={64} />
+                <ThemedText type="smallBold" numberOfLines={1}>
+                  {toDisplayVolume(todayWater, unitSystem)}/{toDisplayVolume(dailyWaterTarget, unitSystem)}{' '}
+                  {volumeUnitLabel(unitSystem)}
+                </ThemedText>
+                <Pressable
+                  style={styles.waterButton}
+                  onPress={() => addWater(unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL)}>
+                  <ThemedText type="small" numberOfLines={1} style={{ color: colors.accent }}>
+                    +{unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL} {volumeUnitLabel(unitSystem)}
+                  </ThemedText>
+                </Pressable>
+              </View>
+            )}
+          </View>
+
+          {goals.length > 0 && (
+            <View style={styles.ringsLegend}>
+              {goals.map((goal, index) => (
+                <LegendStat
+                  key={goal.id}
+                  color={RingColors[index % RingColors.length]}
+                  goal={goal}
+                  value={currentGoalValue(goal, sessions, cardioSessions, waterEntries)}
+                  unitSystem={unitSystem}
+                />
+              ))}
+            </View>
+          )}
+
+          <Pressable style={styles.startButton} onPress={() => router.push('/workout/choose')}>
+            <Svg width={14} height={16} viewBox="0 0 14 16">
+              <Path d="M0 0l14 8-14 8z" fill={colors.background} />
+            </Svg>
+            <ThemedText type="subtitle" style={styles.startButtonText}>
+              Start Workout
+            </ThemedText>
+          </Pressable>
+
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </TabFadeView>
   );
 }
 
-function LegendStat({ color, value, goal, label }: { color: string; value: number; goal: number; label: string }) {
+function LegendStat({
+  color,
+  goal,
+  value,
+  unitSystem,
+}: {
+  color: string;
+  goal: GoalDef;
+  value: number;
+  unitSystem: 'imperial' | 'metric';
+}) {
+  const isVolume = goal.type === 'water';
+  const displayValue = isVolume ? toDisplayVolume(value, unitSystem) : Math.round(value);
+  const displayTarget = isVolume ? toDisplayVolume(goal.target, unitSystem) : goal.target;
+  const unitLabel = isVolume
+    ? volumeUnitLabel(unitSystem)
+    : goal.type === 'calories'
+      ? 'cal'
+      : goal.type === 'cardio'
+        ? 'min cardio'
+        : goal.type === 'workouts'
+          ? 'workouts'
+          : goal.unit;
+
   return (
     <View style={styles.legendStat}>
       <View style={[styles.legendDot, { backgroundColor: color }]} />
       <ThemedText type="small">
-        <ThemedText type="smallBold">{value}</ThemedText>
+        <ThemedText type="smallBold">{displayValue}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          /{goal} {label}
+          /{displayTarget} {unitLabel}
         </ThemedText>
       </ThemedText>
     </View>
@@ -172,6 +246,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
+  // ScrollView needs an explicit width here — `alignItems: 'center'` above means it otherwise
+  // sizes to its own content instead of the viewport, so any row that's naturally wider than the
+  // screen (long text, an unshrinkable button, …) silently pushes the whole page wider than the phone.
+  scroll: {
+    flex: 1,
+    width: '100%',
+  },
   content: {
     width: '100%',
     maxWidth: MaxContentWidth,
@@ -183,8 +264,11 @@ const styles = StyleSheet.create({
   header: {
     gap: Spacing.one,
   },
-  ringsArea: {
+  ringsRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.four,
     marginTop: Spacing.two,
   },
   ringsLegend: {
@@ -202,6 +286,17 @@ const styles = StyleSheet.create({
     width: 9,
     height: 9,
     borderRadius: 4.5,
+  },
+  waterWidget: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    maxWidth: 130,
+  },
+  waterButton: {
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    borderRadius: Spacing.three,
+    backgroundColor: colors.backgroundSelected,
   },
   startButton: {
     backgroundColor: colors.accent,
@@ -252,6 +347,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  checkCircleDone: {
+    backgroundColor: colors.accent,
+  },
+  checkCircleTodo: {
+    borderWidth: 2,
+    borderColor: colors.accentLight,
   },
   checkLabel: {
     flex: 1,

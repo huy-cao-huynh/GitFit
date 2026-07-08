@@ -5,7 +5,12 @@ import { ThemedText } from '@/components/themed-text';
 import { Colors, Spacing } from '@/constants/theme';
 import type { WeekDay } from '@/lib/store/derive';
 
-/** The Sunday-to-Saturday dot row; completed days get a check mark. */
+/**
+ * The Sunday-to-Saturday dot row. A day's dot goes through multiple colors
+ * depending on how much of that day's goals (planned workout + check-offs)
+ * were completed: outlined (none), accentLight (partial), solid accent with
+ * a check mark (all).
+ */
 export function WeekStreak({ days, size = 32 }: { days: WeekDay[]; size?: number }) {
   return (
     <View style={styles.row}>
@@ -15,14 +20,14 @@ export function WeekStreak({ days, size = 32 }: { days: WeekDay[]; size?: number
             style={[
               styles.dot,
               { width: size, height: size, borderRadius: size / 2 },
-              day.done
-                ? { backgroundColor: Colors.accent }
-                : {
-                    borderWidth: 2,
-                    borderColor: day.isToday ? Colors.accentLight : Colors.backgroundSelected,
-                  },
+              day.status === 'all' && { backgroundColor: Colors.accent },
+              day.status === 'partial' && { backgroundColor: Colors.accentLight },
+              day.status === 'none' && {
+                borderWidth: 2,
+                borderColor: day.isToday ? Colors.accentLight : Colors.backgroundSelected,
+              },
             ]}>
-            {day.done && <SymbolView name="checkmark" size={size * 0.42} tintColor={Colors.background} />}
+            {day.status === 'all' && <SymbolView name="checkmark" size={size * 0.42} tintColor={Colors.background} />}
           </View>
           <ThemedText
             type="small"

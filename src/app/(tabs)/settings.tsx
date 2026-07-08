@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Image } from 'expo-image';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -12,19 +12,23 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Chevron } from '@/components/chevron';
 import { GlowBackground } from '@/components/glow-background';
+import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, Destructive, Spacing } from '@/constants/theme';
+import { formatHeight, fromDisplayLength, lengthUnitLabel, toDisplayLength } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
+import type { UnitSystem } from '@/lib/store/types';
 
 const colors = Colors;
 
+type Sex = 'male' | 'female' | 'unset';
+
 export default function SettingsScreen() {
   const { session, signOut, updateProfile, updateEmail, updatePassword } = useAuth();
-  const { goals } = useStore();
+  const { preferences, setPreferences } = useStore();
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -34,17 +38,28 @@ export default function SettingsScreen() {
   const metadata = session?.user.user_metadata ?? {};
   const name = (metadata.full_name as string | undefined) ?? email.split('@')[0] ?? 'You';
   const birthday = (metadata.birthday as string | undefined) ?? '';
+  const avatarUrl = (metadata.avatar_url as string | undefined) ?? '';
+  const heightInches = Number(metadata.height_inches as string | undefined) || null;
+  const sex = ((metadata.sex as string | undefined) ?? 'unset') as Sex;
 
   const [draftName, setDraftName] = useState(name);
   const [draftBirthday, setDraftBirthday] = useState(birthday);
+  const [draftAvatarUrl, setDraftAvatarUrl] = useState(avatarUrl);
   const [draftEmail, setDraftEmail] = useState(email);
   const [draftPassword, setDraftPassword] = useState('');
+  const [draftHeight, setDraftHeight] = useState(
+    heightInches ? String(toDisplayLength(heightInches, preferences.unitSystem)) : '',
+  );
+  const [draftSex, setDraftSex] = useState<Sex>(sex);
 
   const startEditing = () => {
     setDraftName(name);
     setDraftBirthday(birthday);
+    setDraftAvatarUrl(avatarUrl);
     setDraftEmail(email);
     setDraftPassword('');
+    setDraftHeight(heightInches ? String(toDisplayLength(heightInches, preferences.unitSystem)) : '');
+    setDraftSex(sex);
     setError(null);
     setInfo(null);
     setIsEditing(true);
@@ -56,8 +71,23 @@ export default function SettingsScreen() {
     setIsSaving(true);
     try {
       const messages: string[] = [];
-      if (draftName.trim() !== name || draftBirthday.trim() !== birthday) {
-        await updateProfile({ full_name: draftName.trim(), birthday: draftBirthday.trim() });
+      const draftHeightInches = draftHeight.trim()
+        ? Math.round(fromDisplayLength(Number(draftHeight), preferences.unitSystem))
+        : null;
+      if (
+        draftName.trim() !== name ||
+        draftBirthday.trim() !== birthday ||
+        draftAvatarUrl.trim() !== avatarUrl ||
+        draftHeightInches !== heightInches ||
+        draftSex !== sex
+      ) {
+        await updateProfile({
+          full_name: draftName.trim(),
+          birthday: draftBirthday.trim(),
+          avatar_url: draftAvatarUrl.trim(),
+          height_inches: draftHeightInches ? String(draftHeightInches) : '',
+          sex: draftSex,
+        });
         messages.push('Profile updated.');
       }
       if (draftEmail.trim() && draftEmail.trim() !== email) {
@@ -86,7 +116,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <TabFadeView style={styles.container}>
       <GlowBackground variant="cool" />
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <KeyboardAvoidingView
@@ -97,9 +127,13 @@ export default function SettingsScreen() {
 
             <View style={styles.profileRow}>
               <View style={styles.avatar}>
-                <ThemedText type="subtitle" style={styles.avatarText}>
-                  {name.charAt(0).toUpperCase()}
-                </ThemedText>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatarImage} contentFit="cover" />
+                ) : (
+                  <ThemedText type="subtitle" style={styles.avatarText}>
+                    {name.charAt(0).toUpperCase()}
+                  </ThemedText>
+                )}
               </View>
               <View style={styles.flex}>
                 <ThemedText type="smallBold" style={styles.name}>
@@ -108,6 +142,7 @@ export default function SettingsScreen() {
                 <ThemedText type="small" themeColor="textSecondary">
                   {email}
                   {birthday ? ` · ${birthday}` : ''}
+                  {heightInches ? ` · ${formatHeight(heightInches, preferences.unitSystem)}` : ''}
                 </ThemedText>
               </View>
               {!isEditing && (
@@ -127,6 +162,40 @@ export default function SettingsScreen() {
                   value={draftBirthday}
                   onChangeText={setDraftBirthday}
                   placeholder="YYYY-MM-DD"
+                />
+                <ProfileField
+                  label={`Height (${lengthUnitLabel(preferences.unitSystem)})`}
+                  value={draftHeight}
+                  onChangeText={setDraftHeight}
+                  placeholder={preferences.unitSystem === 'metric' ? 'e.g. 178' : 'e.g. 70'}
+                  keyboardType="decimal-pad"
+                />
+                <View style={styles.field}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Sex (for the body-fat estimate)
+                  </ThemedText>
+                  <View style={styles.sexToggle}>
+                    {(['male', 'female', 'unset'] as Sex[]).map((option) => {
+                      const active = draftSex === option;
+                      return (
+                        <Pressable
+                          key={option}
+                          style={[styles.sexButton, active && styles.sexButtonActive]}
+                          onPress={() => setDraftSex(option)}>
+                          <ThemedText type="small" style={active ? { color: colors.background } : undefined}>
+                            {option === 'male' ? 'Male' : option === 'female' ? 'Female' : 'Skip'}
+                          </ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+                <ProfileField
+                  label="Profile picture URL"
+                  value={draftAvatarUrl}
+                  onChangeText={setDraftAvatarUrl}
+                  placeholder="https://..."
+                  keyboardType="url"
                 />
                 <ProfileField
                   label="Email"
@@ -165,34 +234,13 @@ export default function SettingsScreen() {
 
             <View>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-                WEEKLY GOALS
+                UNITS
               </ThemedText>
-              <Pressable onPress={() => router.push('/goals')}>
-                <ThemedView type="backgroundElement" style={styles.goalsCard}>
-                  <GoalRow color={colors.accent} label="Calories" value={`${goals.calories} cal`} />
-                  <GoalRow
-                    color={colors.accentLight}
-                    label="Workouts"
-                    value={`${goals.workoutsPerWeek} / week`}
-                    divider
-                  />
-                  <GoalRow color={colors.text} label="Cardio" value={`${goals.cardioMinutes} min`} divider />
-                  <View style={[styles.goalRow, styles.goalRowDivider]}>
-                    <ThemedText type="small" style={{ color: colors.accent }}>
-                      Edit goals & daily check-offs
-                    </ThemedText>
-                    <Chevron color={colors.textSecondary} />
-                  </View>
-                </ThemedView>
-              </Pressable>
+              <ThemedView type="backgroundElement" style={[styles.section, styles.row]}>
+                <ThemedText type="small">Measurement system</ThemedText>
+                <UnitToggle value={preferences.unitSystem} onChange={(unitSystem) => setPreferences({ unitSystem })} />
+              </ThemedView>
             </View>
-
-            <ThemedView type="backgroundElement" style={[styles.section, styles.row]}>
-              <ThemedText type="small">Units</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                lbs / mi
-              </ThemedText>
-            </ThemedView>
 
             <ThemedView type="backgroundElement" style={[styles.section, styles.row]}>
               <View style={styles.rowText}>
@@ -216,6 +264,26 @@ export default function SettingsScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+    </TabFadeView>
+  );
+}
+
+function UnitToggle({ value, onChange }: { value: UnitSystem; onChange: (value: UnitSystem) => void }) {
+  return (
+    <View style={styles.unitToggle}>
+      {(['imperial', 'metric'] as UnitSystem[]).map((option) => {
+        const active = value === option;
+        return (
+          <Pressable
+            key={option}
+            style={[styles.unitButton, active && styles.unitButtonActive]}
+            onPress={() => onChange(option)}>
+            <ThemedText type="small" style={active ? { color: colors.background } : undefined}>
+              {option === 'imperial' ? 'lbs / mi' : 'kg / km'}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -228,7 +296,7 @@ function ProfileField({
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
-  keyboardType?: 'email-address';
+  keyboardType?: 'email-address' | 'url' | 'decimal-pad';
   secureTextEntry?: boolean;
 }) {
   return (
@@ -242,28 +310,6 @@ function ProfileField({
         autoCapitalize="none"
         {...inputProps}
       />
-    </View>
-  );
-}
-
-function GoalRow({
-  color,
-  label,
-  value,
-  divider,
-}: {
-  color: string;
-  label: string;
-  value: string;
-  divider?: boolean;
-}) {
-  return (
-    <View style={[styles.goalRow, divider && styles.goalRowDivider]}>
-      <View style={styles.goalLabel}>
-        <View style={[styles.goalDot, { backgroundColor: color }]} />
-        <ThemedText type="small">{label}</ThemedText>
-      </View>
-      <ThemedText type="smallBold">{value}</ThemedText>
     </View>
   );
 }
@@ -296,6 +342,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   avatarText: {
     color: colors.background,
@@ -321,6 +372,21 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.backgroundSelected,
   },
+  sexToggle: {
+    flexDirection: 'row',
+    borderRadius: Spacing.three,
+    backgroundColor: colors.backgroundSelected,
+    padding: Spacing.half,
+  },
+  sexButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  sexButtonActive: {
+    backgroundColor: colors.accent,
+  },
   editButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -344,30 +410,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginBottom: Spacing.two,
   },
-  goalsCard: {
+  unitToggle: {
+    flexDirection: 'row',
     borderRadius: Spacing.three,
-    overflow: 'hidden',
+    backgroundColor: colors.backgroundSelected,
+    padding: Spacing.half,
   },
-  goalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  unitButton: {
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
   },
-  goalRowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  goalLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  goalDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
+  unitButtonActive: {
+    backgroundColor: colors.accent,
   },
   section: {
     borderRadius: Spacing.three,
