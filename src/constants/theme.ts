@@ -1,55 +1,46 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * GitFit's brand palette: a single always-dark theme with soft ombre color
+ * glows behind translucent "glass" surfaces — see AGENTS.md. Never responds
+ * to the device's system light/dark setting.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
-export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
+export const Palette = {
+  purple: '#3d348b', // background glows only — too dark for text/marks on near-black
+  periwinkle: '#7678ed', // primary accent: CTAs, active tab, links
+  yellow: '#f7b801',
+  orange: '#f18701',
+  redOrange: '#f35b04',
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+export const Destructive = Palette.redOrange;
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
+export const Colors = {
+  text: '#F4F2FA',
+  background: '#0D0B14',
+  backgroundElement: 'rgba(255,255,255,0.06)',
+  backgroundSelected: 'rgba(118,120,237,0.18)',
+  textSecondary: '#8E8AA6',
+  accent: Palette.periwinkle,
+  accentLight: '#9B9DF2',
+  border: 'rgba(255,255,255,0.10)',
+} as const;
+
+export type ThemeColor = keyof typeof Colors;
+
+/** Warm ring hues, outermost first (move / workouts / cardio). */
+export const RingColors = [Palette.redOrange, Palette.orange, Palette.yellow] as const;
+
+export const Fonts = {
+  regular: 'DMSans_400Regular',
+  medium: 'DMSans_500Medium',
+  semibold: 'DMSans_600SemiBold',
+  bold: 'DMSans_700Bold',
+  mono: Platform.select({ ios: 'ui-monospace', default: 'monospace' }),
+} as const;
 
 export const Spacing = {
   half: 2,
@@ -61,5 +52,6 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
+/** Clearance for the floating pill tab bar (height 60 + margins + safe area overlap). */
+export const BottomTabInset = 112;
 export const MaxContentWidth = 800;
