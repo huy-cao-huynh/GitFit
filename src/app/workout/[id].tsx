@@ -8,12 +8,14 @@ import Svg, { Circle } from 'react-native-svg';
 import { ActivityRings } from '@/components/activity-rings';
 import { GlowBackground } from '@/components/glow-background';
 import { SortableList } from '@/components/sortable-list';
+import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, RingColors, Spacing } from '@/constants/theme';
 import { currentGoalValue, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, RoutineExercise, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
+import { clampToStep, formatStepperValue } from '@/lib/stepper-math';
 import { fromDisplayWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
@@ -28,6 +30,11 @@ interface ExerciseEditDraft {
   id: string;
   name: string;
   kind: ExerciseKind;
+  warmupSets: number;
+  warmupTargetReps: number;
+  warmupTargetWeight: number;
+  warmupTargetDurationSec: number;
+  warmupRestSec: number;
   sets: number;
   targetReps: number;
   targetWeight: number;
@@ -39,9 +46,34 @@ function toWorkoutExercise(exercise: RoutineExercise): WorkoutExercise {
   return {
     ...exercise,
     kind: exercise.kind ?? 'reps',
+    warmupSets: exercise.warmupSets ?? 0,
+    warmupTargetReps: exercise.warmupTargetReps ?? exercise.targetReps,
+    warmupTargetWeight: exercise.warmupTargetWeight ?? 0,
+    warmupTargetDurationSec: exercise.warmupTargetDurationSec ?? exercise.targetDurationSec ?? 30,
+    warmupRestSec: exercise.warmupRestSec ?? exercise.targetRestSec ?? REST_SECONDS,
     targetDurationSec: exercise.targetDurationSec ?? 45,
-    targetRestSec: REST_SECONDS,
+    targetRestSec: exercise.targetRestSec ?? REST_SECONDS,
   };
+}
+
+function totalPlannedSets(exercise: WorkoutExercise): number {
+  return (exercise.warmupSets ?? 0) + exercise.sets;
+}
+
+function setTargetsFor(exercise: WorkoutExercise, isWarmup: boolean) {
+  return isWarmup
+    ? {
+        reps: exercise.warmupTargetReps ?? exercise.targetReps,
+        weight: exercise.warmupTargetWeight ?? 0,
+        durationSec: exercise.warmupTargetDurationSec ?? exercise.targetDurationSec ?? 30,
+        restSec: exercise.warmupRestSec ?? exercise.targetRestSec ?? REST_SECONDS,
+      }
+    : {
+        reps: exercise.targetReps,
+        weight: exercise.targetWeight,
+        durationSec: exercise.targetDurationSec ?? 45,
+        restSec: exercise.targetRestSec ?? REST_SECONDS,
+      };
 }
 
 export default function ActiveWorkoutScreen() {
@@ -88,19 +120,24 @@ export default function ActiveWorkoutScreen() {
   }
 
   const exerciseKind = exercise.kind ?? 'reps';
-  const totalSets = order.reduce((sum, item) => sum + item.sets, 0);
+  const totalSets = order.reduce((sum, item) => sum + totalPlannedSets(item), 0);
   const completedSets = logged.reduce((sum, item) => sum + item.sets.filter((set) => !set.skipped).length, 0);
   const attemptedSets = logged.reduce((sum, item) => sum + item.sets.length, 0);
   const overallProgress = totalSets > 0 ? attemptedSets / totalSets : 0;
-  const isLastSet = setIndex + 1 >= exercise.sets;
+  const warmupSetCount = exercise.warmupSets ?? 0;
+  const isWarmupSet = setIndex < warmupSetCount;
+  const activeSetTargets = setTargetsFor(exercise, isWarmupSet);
+  const plannedSetCount = totalPlannedSets(exercise);
+  const isLastSet = setIndex + 1 >= plannedSetCount;
   const isLastExercise = exerciseIndex + 1 >= order.length;
   const workoutCalories = Math.max(1, Math.round(elapsedSec / 60)) * 8;
 
   const startExercise = () => {
     setStartedAt((value) => value ?? Date.now());
-    setReps(exercise.targetReps);
-    setWeight(exercise.targetWeight);
-    setDurationSec(exercise.targetDurationSec ?? 45);
+    const targets = setTargetsFor(exercise, (exercise.warmupSets ?? 0) > 0);
+    setReps(targets.reps);
+    setWeight(targets.weight);
+    setDurationSec(targets.durationSec);
     setPhase('setPending');
   };
 
@@ -115,11 +152,14 @@ export default function ActiveWorkoutScreen() {
   };
 
   const completeSet = (override?: SetLog) => {
-    const next = appendLog(
+    const warmupFlag = isWarmupSet || undefined;
+    const setLog =
       override ??
-        (exerciseKind === 'time'
-          ? { kind: 'time', durationSec }
-          : { kind: 'reps', reps, weight }),
+      (exerciseKind === 'time'
+        ? { kind: 'time', durationSec, isWarmup: warmupFlag }
+        : { kind: 'reps', reps, weight, isWarmup: warmupFlag });
+    const next = appendLog(
+      override && override.isWarmup === undefined ? { ...setLog, isWarmup: warmupFlag } : setLog,
     );
     setLogged(next);
 
@@ -133,12 +173,22 @@ export default function ActiveWorkoutScreen() {
   };
 
   const skipSet = () => {
-    completeSet(exerciseKind === 'time' ? { kind: 'time', durationSec: 0, skipped: true } : { kind: 'reps', skipped: true });
+    const warmupFlag = isWarmupSet || undefined;
+    completeSet(
+      exerciseKind === 'time'
+        ? { kind: 'time', durationSec: 0, isWarmup: warmupFlag, skipped: true }
+        : { kind: 'reps', isWarmup: warmupFlag, skipped: true },
+    );
   };
 
   const advanceAfterRest = () => {
     if (!isLastSet) {
-      setSetIndex((index) => index + 1);
+      const nextSetIndex = setIndex + 1;
+      const nextTargets = setTargetsFor(exercise, nextSetIndex < warmupSetCount);
+      setSetIndex(nextSetIndex);
+      setReps(nextTargets.reps);
+      setWeight(nextTargets.weight);
+      setDurationSec(nextTargets.durationSec);
       setPhase('setPending');
       return;
     }
@@ -147,9 +197,10 @@ export default function ActiveWorkoutScreen() {
     if (upcoming) {
       setExerciseIndex((index) => index + 1);
       setSetIndex(0);
-      setReps(upcoming.targetReps);
-      setWeight(upcoming.targetWeight);
-      setDurationSec(upcoming.targetDurationSec ?? 45);
+      const upcomingTargets = setTargetsFor(upcoming, (upcoming.warmupSets ?? 0) > 0);
+      setReps(upcomingTargets.reps);
+      setWeight(upcomingTargets.weight);
+      setDurationSec(upcomingTargets.durationSec);
       setPhase('exerciseReady');
     }
   };
@@ -206,6 +257,11 @@ export default function ActiveWorkoutScreen() {
       id: item.id,
       name: item.name,
       kind: item.kind ?? 'reps',
+      warmupSets: item.warmupSets ?? 0,
+      warmupTargetReps: item.warmupTargetReps ?? item.targetReps,
+      warmupTargetWeight: item.warmupTargetWeight ?? 0,
+      warmupTargetDurationSec: item.warmupTargetDurationSec ?? item.targetDurationSec ?? 30,
+      warmupRestSec: item.warmupRestSec ?? item.targetRestSec ?? REST_SECONDS,
       sets: item.sets,
       targetReps: item.targetReps,
       targetWeight: item.targetWeight,
@@ -225,6 +281,11 @@ export default function ActiveWorkoutScreen() {
       id: editingDraft.id,
       name: nextName,
       kind: editingDraft.kind,
+      warmupSets: editingDraft.warmupSets,
+      warmupTargetReps: editingDraft.warmupTargetReps,
+      warmupTargetWeight: editingDraft.warmupTargetWeight,
+      warmupTargetDurationSec: editingDraft.warmupTargetDurationSec,
+      warmupRestSec: editingDraft.warmupRestSec,
       sets: editingDraft.sets,
       targetReps: editingDraft.targetReps,
       targetWeight: editingDraft.targetWeight,
@@ -235,10 +296,11 @@ export default function ActiveWorkoutScreen() {
 
     setOrder((current) => current.map((item) => (item.id === editingDraft.id ? nextExercise : item)));
     if (exercise.id === editingDraft.id) {
-      setReps(nextExercise.targetReps);
-      setWeight(nextExercise.targetWeight);
-      setDurationSec(nextExercise.targetDurationSec ?? 45);
-      setSetIndex((index) => Math.min(index, nextExercise.sets - 1));
+      const nextTargets = setTargetsFor(nextExercise, setIndex < (nextExercise.warmupSets ?? 0));
+      setReps(nextTargets.reps);
+      setWeight(nextTargets.weight);
+      setDurationSec(nextTargets.durationSec);
+      setSetIndex((index) => Math.min(index, totalPlannedSets(nextExercise) - 1));
     }
     setEditingDraft(null);
   };
@@ -372,7 +434,7 @@ export default function ActiveWorkoutScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.topRow}>
           <View style={styles.progressBar}>
-            {Array.from({ length: exercise.sets }, (_, index) => (
+            {Array.from({ length: plannedSetCount }, (_, index) => (
               <View
                 key={index}
                 style={[
@@ -396,14 +458,20 @@ export default function ActiveWorkoutScreen() {
 
         <View style={styles.exerciseHeader}>
           <ThemedText type="smallBold" themeColor="textSecondary">
-            SET {setIndex + 1} OF {exercise.sets}
+            {formatCurrentSetLabel(setIndex, warmupSetCount, exercise.sets).toUpperCase()}
           </ThemedText>
           <ThemedText type="subtitle">{exercise.name}</ThemedText>
         </View>
 
         <View style={styles.flex}>
           {phase === 'setPending' && (
-            <TargetCard exercise={exercise} kind={exerciseKind} unitSystem={unitSystem} />
+            <TargetCard
+              exercise={exercise}
+              kind={exerciseKind}
+              isWarmup={isWarmupSet}
+              targets={activeSetTargets}
+              unitSystem={unitSystem}
+            />
           )}
 
           {phase === 'setActive' && exerciseKind === 'reps' && (
@@ -412,7 +480,7 @@ export default function ActiveWorkoutScreen() {
                 label="Reps"
                 value={reps}
                 min={1}
-                max={Math.max(exercise.targetReps * 2, 20)}
+                max={Math.max(activeSetTargets.reps * 2, 20)}
                 step={1}
                 onChange={setReps}
               />
@@ -420,7 +488,7 @@ export default function ActiveWorkoutScreen() {
                 label="Weight"
                 value={toDisplayWeight(weight, unitSystem)}
                 min={0}
-                max={Math.max(toDisplayWeight(exercise.targetWeight, unitSystem) * 2, unitSystem === 'metric' ? 45 : 100)}
+                max={Math.max(toDisplayWeight(activeSetTargets.weight, unitSystem) * 2, unitSystem === 'metric' ? 45 : 100)}
                 step={unitSystem === 'metric' ? 1 : 2.5}
                 unit={weightUnitLabel(unitSystem)}
                 onChange={(displayValue) => setWeight(fromDisplayWeight(displayValue, unitSystem))}
@@ -440,9 +508,13 @@ export default function ActiveWorkoutScreen() {
           {phase === 'resting' && (
             <CountdownTimer
               key={`rest-${exercise.id}-${setIndex}`}
-              seconds={exercise.targetRestSec ?? REST_SECONDS}
+              seconds={activeSetTargets.restSec}
               label="REST"
-              nextLabel={!isLastSet ? `Set ${setIndex + 2} of ${exercise.sets}` : order[exerciseIndex + 1]?.name ?? ''}
+              nextLabel={
+                !isLastSet
+                  ? formatCurrentSetLabel(setIndex + 1, warmupSetCount, exercise.sets)
+                  : order[exerciseIndex + 1]?.name ?? ''
+              }
               onDone={advanceAfterRest}
               skippable
             />
@@ -493,18 +565,27 @@ export default function ActiveWorkoutScreen() {
 function TargetCard({
   exercise,
   kind,
+  isWarmup,
+  targets,
   unitSystem,
 }: {
   exercise: WorkoutExercise;
   kind: 'reps' | 'time';
+  isWarmup: boolean;
+  targets: ReturnType<typeof setTargetsFor>;
   unitSystem: UnitSystem;
 }) {
   return (
     <ThemedView type="backgroundElement" style={styles.targetCard}>
+      {isWarmup ? (
+        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.lastTime}>
+          WARM-UP
+        </ThemedText>
+      ) : null}
       {kind === 'time' ? (
         <View style={styles.targetColumn}>
           <ThemedText type="title" style={styles.targetValue}>
-            {formatDuration(exercise.targetDurationSec ?? 45)}
+            {formatDuration(targets.durationSec)}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             target time
@@ -514,7 +595,7 @@ function TargetCard({
         <View style={styles.targetRow}>
           <View style={styles.targetColumn}>
             <ThemedText type="title" style={styles.targetValue}>
-              {exercise.targetReps}
+              {targets.reps}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               target reps
@@ -523,7 +604,7 @@ function TargetCard({
           <View style={styles.targetDivider} />
           <View style={styles.targetColumn}>
             <ThemedText type="title" style={styles.targetValue}>
-              {toDisplayWeight(exercise.targetWeight, unitSystem)}
+              {toDisplayWeight(targets.weight, unitSystem)}
               <ThemedText type="small" style={{ color: colors.accentLight }}>
                 {' '}
                 {weightUnitLabel(unitSystem)}
@@ -541,7 +622,7 @@ function TargetCard({
         </ThemedText>
       )}
       <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
-        Rest: {formatDuration(exercise.targetRestSec ?? REST_SECONDS)}
+        Rest: {formatDuration(targets.restSec)}
       </ThemedText>
     </ThemedView>
   );
@@ -598,43 +679,100 @@ function ExerciseEditPanel({
       />
       <ModeToggle kind={draft.kind} onChange={(kind) => onChangeDraft({ kind })} />
       <View style={styles.editControls}>
-        <Stepper label="Sets" value={draft.sets} min={1} step={1} onChange={(sets) => onChangeDraft({ sets })} />
-        {draft.kind === 'time' ? (
+        <View style={styles.editSetGroup}>
+          <ThemedText type="smallBold" themeColor="textSecondary">
+            WARM-UP SETS
+          </ThemedText>
           <Stepper
-            label="Work"
-            value={draft.targetDurationSec}
-            min={5}
+            label="Sets"
+            value={draft.warmupSets}
+            min={0}
+            step={1}
+            onChange={(warmupSets) => onChangeDraft({ warmupSets })}
+          />
+          {draft.warmupSets > 0 ? (
+            draft.kind === 'time' ? (
+              <Stepper
+                label="Work"
+                value={draft.warmupTargetDurationSec}
+                min={5}
+                step={5}
+                suffix="sec"
+                onChange={(warmupTargetDurationSec) => onChangeDraft({ warmupTargetDurationSec })}
+              />
+            ) : (
+              <>
+                <Stepper
+                  label="Reps"
+                  value={draft.warmupTargetReps}
+                  min={1}
+                  step={1}
+                  onChange={(warmupTargetReps) => onChangeDraft({ warmupTargetReps })}
+                />
+                <Stepper
+                  label="Weight"
+                  value={toDisplayWeight(draft.warmupTargetWeight, unitSystem)}
+                  min={0}
+                  step={unitSystem === 'metric' ? 1 : 2.5}
+                  suffix={weightUnitLabel(unitSystem)}
+                  onChange={(displayWeight) => onChangeDraft({ warmupTargetWeight: fromDisplayWeight(displayWeight, unitSystem) })}
+                />
+              </>
+            )
+          ) : null}
+          {draft.warmupSets > 0 ? (
+            <Stepper
+              label="Rest"
+              value={draft.warmupRestSec}
+              min={0}
+              step={5}
+              suffix="sec"
+              onChange={(warmupRestSec) => onChangeDraft({ warmupRestSec })}
+            />
+          ) : null}
+        </View>
+        <View style={styles.editSetGroup}>
+          <ThemedText type="smallBold" themeColor="textSecondary">
+            MAIN SETS
+          </ThemedText>
+          <Stepper label="Sets" value={draft.sets} min={1} step={1} onChange={(sets) => onChangeDraft({ sets })} />
+          {draft.kind === 'time' ? (
+            <Stepper
+              label="Work"
+              value={draft.targetDurationSec}
+              min={5}
+              step={5}
+              suffix="sec"
+              onChange={(targetDurationSec) => onChangeDraft({ targetDurationSec })}
+            />
+          ) : (
+            <>
+              <Stepper
+                label="Reps"
+                value={draft.targetReps}
+                min={1}
+                step={1}
+                onChange={(targetReps) => onChangeDraft({ targetReps })}
+              />
+              <Stepper
+                label="Weight"
+                value={toDisplayWeight(draft.targetWeight, unitSystem)}
+                min={0}
+                step={unitSystem === 'metric' ? 1 : 2.5}
+                suffix={weightUnitLabel(unitSystem)}
+                onChange={(displayWeight) => onChangeDraft({ targetWeight: fromDisplayWeight(displayWeight, unitSystem) })}
+              />
+            </>
+          )}
+          <Stepper
+            label="Rest"
+            value={draft.targetRestSec}
+            min={0}
             step={5}
             suffix="sec"
-            onChange={(targetDurationSec) => onChangeDraft({ targetDurationSec })}
+            onChange={(targetRestSec) => onChangeDraft({ targetRestSec })}
           />
-        ) : (
-          <>
-            <Stepper
-              label="Reps"
-              value={draft.targetReps}
-              min={1}
-              step={1}
-              onChange={(targetReps) => onChangeDraft({ targetReps })}
-            />
-            <Stepper
-              label="Weight"
-              value={toDisplayWeight(draft.targetWeight, unitSystem)}
-              min={0}
-              step={unitSystem === 'metric' ? 1 : 2.5}
-              suffix={weightUnitLabel(unitSystem)}
-              onChange={(displayWeight) => onChangeDraft({ targetWeight: fromDisplayWeight(displayWeight, unitSystem) })}
-            />
-          </>
-        )}
-        <Stepper
-          label="Rest"
-          value={draft.targetRestSec}
-          min={0}
-          step={5}
-          suffix="sec"
-          onChange={(targetRestSec) => onChangeDraft({ targetRestSec })}
-        />
+        </View>
       </View>
       <View style={styles.editActions}>
         <Pressable hitSlop={8} onPress={onCancel}>
@@ -764,47 +902,6 @@ function CountdownTimer({
   );
 }
 
-function Stepper({
-  label,
-  value,
-  min,
-  step,
-  suffix,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  step: number;
-  suffix?: string;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <View style={styles.stepper}>
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
-      <View style={styles.stepperControls}>
-        <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(Math.max(min, value - step))}>
-          <SymbolView name="minus" size={12} tintColor={colors.text} />
-        </Pressable>
-        <ThemedText type="smallBold" style={styles.stepperValue}>
-          {value}
-          {suffix ? (
-            <ThemedText type="small" themeColor="textSecondary">
-              {' '}
-              {suffix}
-            </ThemedText>
-          ) : null}
-        </ThemedText>
-        <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(value + step)}>
-          <SymbolView name="plus" size={12} tintColor={colors.text} />
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function ModeToggle({ kind, onChange }: { kind: ExerciseKind; onChange: (kind: ExerciseKind) => void }) {
   return (
     <View style={styles.modeToggle}>
@@ -902,12 +999,6 @@ function InlineStepper({
   );
 }
 
-function clampToStep(value: number, min: number, max: number, step: number): number {
-  const clamped = Math.max(min, Math.min(max, value));
-  const stepped = min + Math.round((clamped - min) / step) * step;
-  return Number(Math.max(min, Math.min(max, stepped)).toFixed(2));
-}
-
 function SummaryStat({ value, unit, label }: { value: string; unit: string; label: string }) {
   return (
     <View style={styles.summaryStat}>
@@ -926,13 +1017,24 @@ function SummaryStat({ value, unit, label }: { value: string; unit: string; labe
 }
 
 function describeExercise(exercise: WorkoutExercise, unitSystem: UnitSystem): string {
-  const restLabel = `, ${formatDuration(exercise.targetRestSec ?? REST_SECONDS)} rest`;
+  const mainRestLabel = `, ${formatDuration(exercise.targetRestSec ?? REST_SECONDS)} rest`;
+  const warmupTargets = setTargetsFor(exercise, true);
+  const warmupLabel = exercise.warmupSets
+    ? `${exercise.warmupSets} warm-up x ${formatTargets(exercise, warmupTargets, unitSystem)} + `
+    : '';
   if ((exercise.kind ?? 'reps') === 'time') {
-    return `${exercise.sets} x ${formatDuration(exercise.targetDurationSec ?? 45)}${restLabel}`;
+    return `${warmupLabel}${exercise.sets} x ${formatDuration(exercise.targetDurationSec ?? 45)}${mainRestLabel}`;
   }
   const weightLabel =
     exercise.targetWeight > 0 ? ` @ ${toDisplayWeight(exercise.targetWeight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
-  return `${exercise.sets} x ${exercise.targetReps}${weightLabel}${restLabel}`;
+  return `${warmupLabel}${exercise.sets} x ${exercise.targetReps}${weightLabel}${mainRestLabel}`;
+}
+
+function formatTargets(exercise: WorkoutExercise, targets: ReturnType<typeof setTargetsFor>, unitSystem: UnitSystem): string {
+  const restLabel = `, ${formatDuration(targets.restSec)} rest`;
+  if ((exercise.kind ?? 'reps') === 'time') return `${formatDuration(targets.durationSec)}${restLabel}`;
+  const weightLabel = targets.weight > 0 ? ` @ ${toDisplayWeight(targets.weight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
+  return `${targets.reps}${weightLabel}${restLabel}`;
 }
 
 function formatSetLog(set: { reps?: number; weight?: number; durationSec?: number }, unitSystem: UnitSystem): string {
@@ -941,8 +1043,9 @@ function formatSetLog(set: { reps?: number; weight?: number; durationSec?: numbe
   return `${set.reps ?? 0} reps${weightLabel}`;
 }
 
-function formatStepperValue(value: number): string {
-  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+function formatCurrentSetLabel(setIndex: number, warmupSets: number, workingSets: number): string {
+  if (setIndex < warmupSets) return `Warm-up ${setIndex + 1} of ${warmupSets}`;
+  return `Set ${setIndex - warmupSets + 1} of ${workingSets}`;
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -1028,6 +1131,16 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.three,
   },
+  editSetGroup: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.two,
+    borderRadius: Spacing.two,
+    backgroundColor: colors.backgroundSelected,
+  },
   editActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -1050,27 +1163,6 @@ const styles = StyleSheet.create({
   },
   modeTextActive: {
     color: colors.background,
-  },
-  stepper: {
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  stepperControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  stepperButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.backgroundSelected,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperValue: {
-    minWidth: 42,
-    textAlign: 'center',
   },
   targetCard: {
     borderRadius: Spacing.four,

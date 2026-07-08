@@ -42,10 +42,16 @@ interface RoutineExerciseRow {
   position: number;
   name: string;
   kind: ExerciseKind;
+  warmup_sets: number | null;
+  warmup_target_reps: number | null;
+  warmup_target_weight: number | null;
+  warmup_target_duration_sec: number | null;
+  warmup_rest_sec: number | null;
   sets: number;
   target_reps: number;
   target_weight: number;
   target_duration_sec: number | null;
+  target_rest_sec: number | null;
   last_reps: number | null;
   last_weight: number | null;
   last_duration_sec: number | null;
@@ -72,6 +78,7 @@ interface SessionSetRow {
   reps: number | null;
   weight: number | null;
   duration_sec: number | null;
+  is_warmup: boolean;
   skipped: boolean;
 }
 
@@ -157,10 +164,16 @@ function mapRoutineExercise(row: RoutineExerciseRow): RoutineExercise {
     id: row.id,
     name: row.name,
     kind: row.kind,
+    warmupSets: row.warmup_sets ?? undefined,
+    warmupTargetReps: row.warmup_target_reps ?? undefined,
+    warmupTargetWeight: row.warmup_target_weight ?? undefined,
+    warmupTargetDurationSec: row.warmup_target_duration_sec ?? undefined,
+    warmupRestSec: row.warmup_rest_sec ?? undefined,
     sets: row.sets,
     targetReps: row.target_reps,
     targetWeight: row.target_weight,
     targetDurationSec: row.target_duration_sec ?? undefined,
+    targetRestSec: row.target_rest_sec ?? undefined,
     lastTime: hasLastTime
       ? {
           reps: row.last_reps ?? undefined,
@@ -192,6 +205,7 @@ function mapSetLog(row: SessionSetRow): SetLog {
     reps: row.reps ?? undefined,
     weight: row.weight ?? undefined,
     durationSec: row.duration_sec ?? undefined,
+    isWarmup: row.is_warmup || undefined,
     skipped: row.skipped || undefined,
   };
 }
@@ -352,10 +366,16 @@ function routineExerciseToRow(routineId: string, exercise: RoutineExercise, posi
     position,
     name: exercise.name,
     kind: exercise.kind ?? 'reps',
+    warmup_sets: exercise.warmupSets ?? 0,
+    warmup_target_reps: exercise.warmupTargetReps ?? null,
+    warmup_target_weight: exercise.warmupTargetWeight ?? null,
+    warmup_target_duration_sec: exercise.warmupTargetDurationSec ?? null,
+    warmup_rest_sec: exercise.warmupRestSec ?? null,
     sets: exercise.sets,
     target_reps: exercise.targetReps,
     target_weight: exercise.targetWeight,
     target_duration_sec: exercise.targetDurationSec ?? null,
+    target_rest_sec: exercise.targetRestSec ?? null,
     last_reps: exercise.lastTime?.reps ?? null,
     last_weight: exercise.lastTime?.weight ?? null,
     last_duration_sec: exercise.lastTime?.durationSec ?? null,
@@ -428,6 +448,7 @@ export async function insertSession(session: Session): Promise<void> {
       reps: set.reps ?? null,
       weight: set.weight ?? null,
       duration_sec: set.durationSec ?? null,
+      is_warmup: set.isWarmup ?? false,
       skipped: set.skipped ?? false,
     })),
   );

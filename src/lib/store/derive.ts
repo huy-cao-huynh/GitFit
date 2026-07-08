@@ -116,6 +116,45 @@ export function scheduledRoutineTasks(
   }));
 }
 
+export interface UnscheduledCompletedWorkout {
+  id: string;
+  name: string;
+  category: 'strength' | 'cardio';
+  minutes: number;
+}
+
+/**
+ * Completed sessions/cardio sessions on a date whose routine wasn't scheduled
+ * for that day — e.g. an ad-hoc workout, or a routine run on an off day.
+ * `scheduledRoutineTasks` already covers scheduled-and-completed routines,
+ * so these are the extra ones a day's schedule wouldn't otherwise surface.
+ */
+export function unscheduledCompletedWorkouts(
+  routines: Routine[] = [],
+  sessions: Session[] = [],
+  cardioSessions: CardioSession[] = [],
+  dateKey: string,
+): UnscheduledCompletedWorkout[] {
+  const scheduledIds = new Set(scheduledRoutinesForDate(routines, dateKey).map((routine) => routine.id));
+  const strength = sessions
+    .filter((session) => session.date === dateKey && !(session.routineId && scheduledIds.has(session.routineId)))
+    .map((session) => ({
+      id: session.id,
+      name: session.routineName,
+      category: 'strength' as const,
+      minutes: session.durationMinutes,
+    }));
+  const cardio = cardioSessions
+    .filter((session) => session.date === dateKey && !(session.routineId && scheduledIds.has(session.routineId)))
+    .map((session) => ({
+      id: session.id,
+      name: session.name,
+      category: 'cardio' as const,
+      minutes: session.minutes,
+    }));
+  return [...strength, ...cardio];
+}
+
 export function calendarWeekDays(
   routines: Routine[] = [],
   sessions: Session[] = [],
@@ -131,14 +170,17 @@ export function calendarWeekDays(
     const date = new Date(sunday);
     date.setDate(sunday.getDate() + index);
     const dateKey = toDateKey(date);
-    const tasks = scheduledRoutineTasks(routines, sessions, cardioSessions, dateKey);
+    const scheduledCount = scheduledRoutinesForDate(routines, dateKey).length;
+    const completedCount =
+      sessions.filter((session) => session.date === dateKey).length +
+      cardioSessions.filter((session) => session.date === dateKey).length;
     return {
       date: dateKey,
       label: option.short,
       dayNumber: date.getDate(),
       isToday: dateKey === todaysKey,
-      scheduledCount: tasks.length,
-      completedCount: tasks.filter((task) => task.completed).length,
+      scheduledCount,
+      completedCount,
     };
   });
 }
@@ -242,7 +284,10 @@ export function strengthSeries(sessions: Session[], name: string): ProgressPoint
   for (const session of sessions) {
     const exercise = session.exercises.find((e) => e.name === name);
     if (!exercise || exercise.sets.length === 0) continue;
-    const weights = exercise.sets.map((set) => set.weight ?? 0).filter((weight) => weight > 0);
+    const weights = exercise.sets
+      .filter((set) => !set.isWarmup)
+      .map((set) => set.weight ?? 0)
+      .filter((weight) => weight > 0);
     if (weights.length === 0) continue;
     points.push({ date: session.date, value: Math.max(...weights) });
   }

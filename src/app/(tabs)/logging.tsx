@@ -26,6 +26,7 @@ import {
   scheduledRoutineTasks,
   todayKey,
   todayWaterOunces,
+  unscheduledCompletedWorkouts,
   type Sex,
 } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
@@ -125,6 +126,7 @@ export default function LoggingScreen() {
   });
   const calendarDays = calendarWeekDays(routines, sessions, cardioSessions, selectedDateObject);
   const selectedTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, selectedDate);
+  const extraCompletedWorkouts = unscheduledCompletedWorkouts(routines, sessions, cardioSessions, selectedDate);
 
   const addCheckoff = () => {
     const name = newCheckoff.trim();
@@ -225,7 +227,7 @@ export default function LoggingScreen() {
               <View style={styles.calendarRow}>
                 {calendarDays.map((day) => {
                   const selected = day.date === selectedDate;
-                  const complete = day.scheduledCount > 0 && day.completedCount >= day.scheduledCount;
+                  const complete = day.completedCount > 0 && day.completedCount >= day.scheduledCount;
                   const todo = day.scheduledCount > 0 && !complete;
                   const missed = todo && day.date < today;
                   return (
@@ -279,38 +281,51 @@ export default function LoggingScreen() {
                 <ThemedText type="smallBold">{selectedDateLabel}</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   {selectedTasks.length} scheduled
+                  {extraCompletedWorkouts.length > 0 ? ` · ${extraCompletedWorkouts.length} extra` : ''}
                 </ThemedText>
               </View>
 
-              {selectedTasks.length === 0 ? (
+              {selectedTasks.length === 0 && extraCompletedWorkouts.length === 0 ? (
                 <ThemedText type="small" themeColor="textSecondary">
                   No workouts scheduled for this day.
                 </ThemedText>
               ) : (
-                selectedTasks.map((task) => {
-                  const incomplete = !task.completed && selectedDate < today;
-                  const path =
-                    task.routine.category === 'cardio'
-                      ? { pathname: '/cardio/[id]' as const, params: { id: task.routine.id } }
-                      : { pathname: '/workout/[id]' as const, params: { id: task.routine.id } };
-                  return (
-                    <Pressable
-                      key={task.routine.id}
-                      style={styles.scheduledRow}
-                      onPress={() => router.push(path)}
-                      disabled={task.completed}>
+                <>
+                  {selectedTasks.map((task) => {
+                    const incomplete = !task.completed && selectedDate < today;
+                    const path =
+                      task.routine.category === 'cardio'
+                        ? { pathname: '/cardio/[id]' as const, params: { id: task.routine.id } }
+                        : { pathname: '/workout/[id]' as const, params: { id: task.routine.id } };
+                    return (
+                      <Pressable
+                        key={task.routine.id}
+                        style={styles.scheduledRow}
+                        onPress={() => router.push(path)}
+                        disabled={task.completed}>
+                        <View style={styles.flex}>
+                          <ThemedText type="smallBold">{task.routine.name}</ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            {task.completed
+                              ? 'Completed'
+                              : `${incomplete ? 'Incomplete' : 'TODO'} · ${task.routine.durationMinutes} min`}
+                          </ThemedText>
+                        </View>
+                        {!task.completed && <SymbolView name="chevron.right" size={12} tintColor={colors.textSecondary} />}
+                      </Pressable>
+                    );
+                  })}
+                  {extraCompletedWorkouts.map((workout) => (
+                    <View key={workout.id} style={styles.scheduledRow}>
                       <View style={styles.flex}>
-                        <ThemedText type="smallBold">{task.routine.name}</ThemedText>
+                        <ThemedText type="smallBold">{workout.name}</ThemedText>
                         <ThemedText type="small" themeColor="textSecondary">
-                          {task.completed
-                            ? 'Completed'
-                            : `${incomplete ? 'Incomplete' : 'TODO'} · ${task.routine.durationMinutes} min`}
+                          {`Completed · ${workout.minutes} min`}
                         </ThemedText>
                       </View>
-                      {!task.completed && <SymbolView name="chevron.right" size={12} tintColor={colors.textSecondary} />}
-                    </Pressable>
-                  );
-                })
+                    </View>
+                  ))}
+                </>
               )}
             </ThemedView>
 

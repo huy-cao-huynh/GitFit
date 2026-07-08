@@ -50,6 +50,6 @@ There is no test suite yet. Verify changes with, in order:
 1. `npx tsc --noEmit` — must pass. (If it complains about missing `expo-env.d.ts` / CSS module types on a fresh clone, or about a route string you just added, run `npx expo start` once to regenerate typed routes.)
 2. `npm run lint` — must pass clean, no known pre-existing errors.
 3. Metro bundle smoke test (catches broken imports across all routes): start `npx expo start --port 8090` and curl `http://localhost:8090/node_modules/expo-router/entry.bundle?platform=ios&dev=true` — expect HTTP 200.
-4. **No Xcode on this Mac** (Command Line Tools only) — there is no iOS simulator. Real-device testing happens via Expo Go: `npm start`, then the user scans the QR code. Ask the user to verify device-only behavior (tab bar rendering, sliders, drag-reorder, OAuth redirect, keyboard handling).
+4. iOS simulator testing: Xcode is installed (iPhone 17 simulators) — `npx expo start` then press `i` installs an SDK-matching Expo Go in the simulator automatically. Real-device testing via Expo Go on the user's iPhone (`npm start` + QR scan; keep the phone's Expo Go updated so its SDK matches). Ask the user to verify device-only feel (haptics, sliders, drag-reorder, keyboard handling); OAuth redirects work in the simulator too.
 
 When adding a test framework later, prefer `jest-expo` + React Native Testing Library.

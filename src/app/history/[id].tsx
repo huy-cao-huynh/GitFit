@@ -99,7 +99,7 @@ function ExerciseCard({ exercise }: { exercise: SessionExercise }) {
       {exercise.sets.map((set, index) => (
         <View key={index} style={[styles.setRow, index > 0 && styles.setRowDivider]}>
           <ThemedText type="small" themeColor="textSecondary" style={styles.setNumber}>
-            Set {index + 1}
+            {formatSetLabel(exercise.sets, index)}
           </ThemedText>
           <ThemedText type="small">{formatSetValue(set)}</ThemedText>
           <ThemedText type="small" style={styles.setWeight}>
@@ -115,6 +115,12 @@ function formatSetValue(set: { reps?: number; durationSec?: number; skipped?: bo
   if (set.skipped) return 'Skipped';
   if (set.durationSec !== undefined) return formatDuration(set.durationSec);
   return `${set.reps ?? 0} reps`;
+}
+
+function formatSetLabel(sets: { isWarmup?: boolean }[], index: number) {
+  const set = sets[index];
+  const matchingBefore = sets.slice(0, index + 1).filter((candidate) => candidate.isWarmup === set.isWarmup).length;
+  return set.isWarmup ? `Warm-up ${matchingBefore}` : `Set ${matchingBefore}`;
 }
 
 function formatSetDetail(set: { weight?: number; durationSec?: number; skipped?: boolean }) {
@@ -181,7 +187,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   setNumber: {
-    width: 64,
+    width: 84,
   },
   setWeight: {
     marginLeft: 'auto',

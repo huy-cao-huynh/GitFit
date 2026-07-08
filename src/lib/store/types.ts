@@ -10,10 +10,16 @@ export interface RoutineExercise {
   id: string;
   name: string;
   kind?: ExerciseKind;
+  warmupSets?: number;
+  warmupTargetReps?: number;
+  warmupTargetWeight?: number;
+  warmupTargetDurationSec?: number;
+  warmupRestSec?: number;
   sets: number;
   targetReps: number;
   targetWeight: number;
   targetDurationSec?: number;
+  targetRestSec?: number;
   lastTime: { reps?: number; weight?: number; durationSec?: number } | null;
 }
 
@@ -46,6 +52,7 @@ export interface SetLog {
   reps?: number;
   weight?: number;
   durationSec?: number;
+  isWarmup?: boolean;
   skipped?: boolean;
 }
 
