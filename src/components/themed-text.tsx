@@ -1,6 +1,6 @@
 import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
 
-import { Fonts, Palette, ThemeColor } from '@/constants/theme';
+import { Colors, Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextProps = TextProps & {
@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semibold,
     lineHeight: 30,
     fontSize: 14,
-    color: Palette.periwinkle,
+    color: Colors.primaryLight,
   },
   code: {
     fontFamily: Fonts.mono,

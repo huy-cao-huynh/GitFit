@@ -18,7 +18,7 @@ MVP roadmap (in priority order):
 
 - Routes live in `src/app/` (NOT root `app/`). Path alias `@/*` → `./src/*`.
 - Root `_layout.tsx`: `GestureHandlerRootView` → dark nav theme → `AuthProvider` → `StoreProvider` → `Stack` with `Stack.Protected` guards keyed on the Supabase session — never add manual login redirects; flipping the guard handles navigation. `RootNavigator` also gates on `useStore().isHydrated`.
-- `(tabs)/_layout.tsx`: JS `Tabs` from `expo-router/js-tabs` with a custom `tabBar` — `GlassTabBar` (`src/components/glass-tab-bar.tsx`), a floating dark pill with SF-symbol icons and a reanimated sliding indicator. 5 tabs: dashboard, history, progress, workouts, settings.
+- `(tabs)/_layout.tsx`: JS `Tabs` from `expo-router/js-tabs` with a custom `tabBar` — `TabBar` (`src/components/tab-bar.tsx`), an anchored full-width matte bar (opaque `surface`, thin top border) with SF-symbol icons and a reanimated `surfaceElevated` pill that slides behind the active tab. 5 tabs: dashboard, history, progress, workouts, settings.
 - `workout/choose.tsx`: modal picker for which routine to start, pushed from the dashboard's Start Workout button.
 - `workout/[id].tsx`: active-session screen, full-screen push. State machine: idle (overview + Start Workout) → per set: Start Set → sliders (reps/weight) → Complete Set → rest countdown → next. Saves a `Session` to the store on finish. Timers recompute from wall-clock timestamps, never tick counts.
 - `history/[id].tsx`: per-session detail (sets × reps × weight + duration/calories).
@@ -33,16 +33,22 @@ MVP roadmap (in priority order):
 - **Google login**: browser OAuth via `expo-web-browser` + `supabase.auth.signInWithOAuth` (see `signInWithGoogle` in the auth provider). Redirect URLs must be registered in the Supabase dashboard.
 - **Apple Health**: not integrated yet; will require a dev build (not Expo Go) when added. The Progress "Steps" series reads `StepsEntry[]` from the store — HealthKit will fill the same interface.
 
-# Conventions
+# Conventions — design language: "Precision. Focus. Momentum."
 
-- Reuse `ThemedText` / `ThemedView` (`src/components/`) and `Colors` / `Palette` / `RingColors` / `Spacing` / `Fonts` from `src/constants/theme.ts` — no hardcoded spacing or colors.
-- GitFit uses a **single fixed dark theme**, not the OS light/dark setting: near-black `Colors.background` (`#0D0B14`) with translucent "glass" surfaces (`backgroundElement`) over `GlowBackground` (`src/components/glow-background.tsx`) ombre halos. `useTheme()` just returns `Colors` — there is no scheme context anymore; don't reintroduce OS-based scheme switching or a light theme.
-- Palette (`Palette` in theme.ts): periwinkle `#7678ed` is the primary accent (CTAs, active tab); deep purple `#3d348b` is for background glows ONLY (fails contrast as text/marks); yellow/orange/red-orange are for rings, chart series, and warm glows. Chart series colors: Steps = yellow, Bodyweight = periwinkle, Strength = orange — one series per chart, never orange + red-orange together.
+The app reads as a premium matte training tool, not a flashy fitness app: matte charcoal surfaces, one blue primary family, thin borders instead of shadows/glows, strong hierarchy, fast restrained motion. NO glassmorphism, frosted/translucent surfaces, background glows, drop shadows, or competing accent hues — do not reintroduce them.
+
+- Reuse `ThemedText` / `ThemedView` (`src/components/`) and `Colors` / `RingColors` / `ChartColors` / `Radius` / `Motion` / `Spacing` / `Fonts` from `src/constants/theme.ts` — no hardcoded spacing, radii, durations, or colors.
+- **Single fixed dark theme**, not the OS light/dark setting: `background` `#121212`, opaque card `surface` `#1C1C1E`, raised controls `surfaceElevated` `#25252B` (steppers, segmented tracks, dropdowns, tab pill). `useTheme()` just returns `Colors` — no scheme context; don't reintroduce OS-based scheme switching or a light theme.
+- **Primary blue family**: `primary` `#2563EB` (fills + large/bold text only — 3.7:1 on the background, fails for small text), `primaryLight` `#60A5FA` (small accent text, links, icons, active tab), `primaryDark` `#1D4ED8` (gradient dark stop). Semantic: `success` `#22C55E`, `warning` `#F59E0B`, `danger` `#EF4444`. Content on primary fills is `Colors.text`, never `Colors.background`.
+- **Cards**: opaque `surface` fill + `Radius.lg` (20) + 1px `Colors.border` (`rgba(255,255,255,0.08)`) + `Spacing.three/four` padding. Buttons/inputs `Radius.md` (16), inner chips/segments `Radius.sm` (12). Never use `Spacing.*` as a borderRadius.
+- **Gradients** appear ONLY on progress rings, progress bars, charts, primary CTA buttons, and achievement/PR indicators — never on backgrounds, cards, large containers, or text. Primary CTAs use `GradientFill` (`src/components/gradient-fill.tsx`, svg `primary → primaryDark`; parent needs `overflow: 'hidden'` + radius). No `expo-linear-gradient` — everything is `react-native-svg`.
+- **Data colors**: `RingColors` (dashboard/finished rings, outermost first) and `ChartColors` (one series per chart: steps/bodyweight = primaryLight, strength/water = primary, cardio = success, calories = warning) live in theme.ts — change them there, not per-screen.
+- **Motion**: all animations `withTiming` with `Motion.fast/base/slow` (150/200/250 ms) — no springs, no long animations.
 - Font is DM Sans (`@expo-google-fonts/dm-sans`, loaded in the root layout) — `Fonts.regular/medium/semibold/bold` map to the loaded weights.
 - Charts are hand-rolled `react-native-svg` (`line-chart.tsx`, `contribution-grid.tsx`, `activity-rings.tsx`) — no chart library.
 - Kebab-case file names (`auth-provider.tsx`), `StyleSheet.create` at the bottom of the file.
-- Primary action color: `Colors.accent` (`#7678ed`); destructive: `Destructive` (red-orange `#f35b04`).
-- Screens under the tab bar pad scrollable content with `BottomTabInset` so it clears the floating pill.
+- Routine `tileColor` is still stored in Supabase but is no longer read for rendering (legacy rows hold old-palette values); routine tiles render `Colors.primaryTint`.
+- Screens under the tab bar pad scrollable content with `BottomTabInset` (96) so it clears the anchored bar.
 
 # Testing & verification
 

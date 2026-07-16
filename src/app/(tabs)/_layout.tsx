@@ -1,11 +1,11 @@
 import { Tabs } from 'expo-router/js-tabs';
 
-import { GlassTabBar } from '@/components/glass-tab-bar';
+import { TabBar } from '@/components/tab-bar';
 
 export default function TabLayout() {
   return (
     <Tabs
-      tabBar={(props) => <GlassTabBar {...props} />}
+      tabBar={(props) => <TabBar {...props} />}
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: 'transparent' } }}>
       <Tabs.Screen name="dashboard" options={{ title: 'Home' }} />
       <Tabs.Screen name="logging" options={{ title: 'Log' }} />

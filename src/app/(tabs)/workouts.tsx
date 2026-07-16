@@ -6,11 +6,10 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { SymbolView } from 'expo-symbols';
 
 import { Chevron } from '@/components/chevron';
-import { GlowBackground } from '@/components/glow-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Colors, Spacing } from '@/constants/theme';
+import { BottomTabInset, Colors, Radius, Spacing } from '@/constants/theme';
 import { routineScheduleLabel } from '@/lib/store/derive';
 import type { Routine, WorkoutCategory } from '@/lib/store/types';
 import { formatDistance } from '@/lib/units';
@@ -27,7 +26,6 @@ export default function WorkoutsScreen() {
 
   return (
     <TabFadeView style={styles.container}>
-      <GlowBackground variant="cool" />
       <SafeAreaView style={styles.safeArea}>
         <ThemedText type="subtitle" style={styles.title}>
           Workouts
@@ -41,7 +39,7 @@ export default function WorkoutsScreen() {
                 key={option}
                 style={[styles.segment, active && styles.segmentActive]}
                 onPress={() => setCategory(option)}>
-                <ThemedText type="smallBold" style={active ? { color: colors.background } : undefined}>
+                <ThemedText type="smallBold" style={active ? { color: colors.text } : undefined}>
                   {CATEGORY_LABELS[option]}
                 </ThemedText>
               </Pressable>
@@ -58,9 +56,9 @@ export default function WorkoutsScreen() {
               style={styles.createRow}
               onPress={() => router.push(category === 'strength' ? '/routine/new' : '/cardio-routine/new')}>
               <View style={styles.createIcon}>
-                <SymbolView name="plus" size={16} tintColor={colors.background} />
+                <SymbolView name="plus" size={16} tintColor={colors.text} />
               </View>
-              <ThemedText type="smallBold" style={{ color: colors.accent }}>
+              <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                 New {CATEGORY_LABELS[category]} Workout
               </ThemedText>
             </Pressable>
@@ -97,10 +95,10 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
 
   return (
     <Pressable onPress={goToEdit}>
-      <ThemedView type="backgroundElement" style={styles.routineCard}>
-        <View style={[styles.routineIcon, { backgroundColor: routine.tileColor }]}>
+      <ThemedView type="surface" style={styles.routineCard}>
+        <View style={styles.routineIcon}>
           <Svg width={20} height={20} viewBox="0 0 20 20">
-            <Rect x={3} y={3} width={14} height={14} rx={3} fill="none" stroke={colors.accent} strokeWidth={2} />
+            <Rect x={3} y={3} width={14} height={14} rx={3} fill="none" stroke={colors.primaryLight} strokeWidth={2} />
           </Svg>
         </View>
         <View style={styles.routineText}>
@@ -114,10 +112,10 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
         </View>
         <Pressable hitSlop={8} style={styles.playButton} onPress={goToPlay}>
           <Svg width={12} height={14} viewBox="0 0 14 16">
-            <Path d="M0 0l14 8-14 8z" fill={colors.background} />
+            <Path d="M0 0l14 8-14 8z" fill={colors.text} />
           </Svg>
         </Pressable>
-        <Chevron color={colors.textSecondary} />
+        <Chevron color={colors.textMuted} />
       </ThemedView>
     </Pressable>
   );
@@ -143,25 +141,27 @@ const styles = StyleSheet.create({
   },
   segmented: {
     flexDirection: 'row',
-    borderRadius: Spacing.four,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     padding: Spacing.half,
     marginBottom: Spacing.three,
   },
   segment: {
     flex: 1,
     alignItems: 'center',
-    borderRadius: Spacing.four,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.two,
   },
   segmentActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   list: {
     gap: Spacing.two,
   },
   routineCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -170,7 +170,8 @@ const styles = StyleSheet.create({
   routineIcon: {
     width: 44,
     height: 44,
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.primaryTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -182,16 +183,16 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 2,
   },
   createRow: {
-    borderWidth: 2,
+    borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: colors.accent,
-    borderRadius: Spacing.four,
+    borderColor: colors.textMuted,
+    borderRadius: Radius.lg,
     padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -201,8 +202,8 @@ const styles = StyleSheet.create({
   createIcon: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.accent,
+    borderRadius: Radius.full,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },

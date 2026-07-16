@@ -1,32 +1,38 @@
 /**
- * GitFit's brand palette: a single always-dark theme with soft ombre color
- * glows behind translucent "glass" surfaces — see AGENTS.md. Never responds
- * to the device's system light/dark setting.
+ * GitFit's design language: "Precision. Focus. Momentum." A single fixed
+ * matte-charcoal dark theme (never follows the OS setting) — opaque surfaces,
+ * thin borders instead of shadows or glows, one blue primary family, and
+ * green/amber reserved for semantic accents. Gradients appear only on
+ * progress rings, progress bars, charts, primary CTAs, and PR/achievement
+ * indicators — never on backgrounds, cards, or text.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
-export const Palette = {
-  purple: '#3d348b', // background glows only — too dark for text/marks on near-black
-  periwinkle: '#7678ed', // primary accent: CTAs, active tab, links
-  yellow: '#f7b801',
-  orange: '#f18701',
-  redOrange: '#f35b04',
-} as const;
-
-export const Destructive = Palette.redOrange;
-
 export const Colors = {
-  text: '#F4F2FA',
-  background: '#0D0B14',
-  backgroundElement: 'rgba(255,255,255,0.06)',
-  backgroundSelected: 'rgba(118,120,237,0.18)',
-  textSecondary: '#8E8AA6',
-  accent: Palette.periwinkle,
-  accentLight: '#9B9DF2',
-  border: 'rgba(255,255,255,0.10)',
+  text: '#F4F6FB',
+  textSecondary: '#A7B0C3',
+  /** Inactive/decorative labels only (4.05:1 on background) — never body copy. */
+  textMuted: '#6D7485',
+  background: '#121212',
+  /** Opaque matte card surface. */
+  surface: '#1C1C1E',
+  /** Raised controls: steppers, segmented tracks, dropdowns, active tab pill. */
+  surfaceElevated: '#25252B',
+  /** Fills and large/bold text only — 3.7:1 on background fails for small text. */
+  primary: '#2563EB',
+  /** Small accent text, links, icons (7.5:1 on background). */
+  primaryLight: '#60A5FA',
+  /** Dark stop for primary gradients. */
+  primaryDark: '#1D4ED8',
+  success: '#22C55E',
+  warning: '#F59E0B',
+  danger: '#EF4444',
+  border: 'rgba(255,255,255,0.08)',
+  /** Subtle primary-tinted chip/tile backgrounds. */
+  primaryTint: 'rgba(37,99,235,0.18)',
 } as const;
 
 export type ThemeColor = keyof typeof Colors;
@@ -34,15 +40,40 @@ export type ThemeColor = keyof typeof Colors;
 /**
  * Ring hues, outermost first. One goal ring is added/removed per active
  * modular goal on the Dashboard; colors cycle if more goals than hues are
- * active.
+ * active. Alternates hue families so adjacent rings read apart.
  */
-export const RingColors = [Palette.redOrange, Palette.orange, Palette.yellow, Palette.periwinkle] as const;
+export const RingColors = [Colors.primaryLight, Colors.success, Colors.primary, Colors.warning] as const;
+
+/** Per-metric chart series colors — one series per chart. */
+export const ChartColors = {
+  steps: Colors.primaryLight,
+  calories: Colors.warning,
+  cardio: Colors.success,
+  water: Colors.primary,
+  bodyweight: Colors.primaryLight,
+  strength: Colors.primary,
+} as const;
+
+/** Corner radii: cards lg, buttons/inputs md, inner chips/segments sm, circles/pills full. */
+export const Radius = {
+  sm: 12,
+  md: 16,
+  lg: 20,
+  full: 999,
+} as const;
+
+/** Animation durations (ms) — always withTiming, never springs. */
+export const Motion = {
+  fast: 150,
+  base: 200,
+  slow: 250,
+} as const;
 
 export const Fonts = {
-  regular: 'DMSans_400Regular',
-  medium: 'DMSans_500Medium',
-  semibold: 'DMSans_600SemiBold',
-  bold: 'DMSans_700Bold',
+  regular: 'Manrope_400Regular',
+  medium: 'Manrope_500Medium',
+  semibold: 'Manrope_600SemiBold',
+  bold: 'Manrope_700Bold',
   mono: Platform.select({ ios: 'ui-monospace', default: 'monospace' }),
 } as const;
 
@@ -56,6 +87,6 @@ export const Spacing = {
   six: 64,
 } as const;
 
-/** Clearance for the floating pill tab bar (height 60 + margins + safe area overlap). */
-export const BottomTabInset = 112;
+/** Clearance for the anchored tab bar (height 56 + home-indicator safe area). */
+export const BottomTabInset = 96;
 export const MaxContentWidth = 800;

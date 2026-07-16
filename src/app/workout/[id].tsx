@@ -6,12 +6,12 @@ import { SymbolView } from 'expo-symbols';
 import Svg, { Circle } from 'react-native-svg';
 
 import { ActivityRings } from '@/components/activity-rings';
-import { GlowBackground } from '@/components/glow-background';
+import { GradientFill } from '@/components/gradient-fill';
 import { SortableList } from '@/components/sortable-list';
 import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, RingColors, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
 import { currentGoalValue, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, RoutineExercise, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
@@ -108,10 +108,10 @@ export default function ActiveWorkoutScreen() {
   if (!routine || !exercise) {
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <ThemedText type="subtitle">Workout not found</ThemedText>
           <Pressable style={styles.primaryButton} onPress={() => router.back()}>
+            <GradientFill />
             <ThemedText style={styles.primaryButtonText}>Back</ThemedText>
           </Pressable>
         </SafeAreaView>
@@ -311,7 +311,6 @@ export default function ActiveWorkoutScreen() {
 
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.finishedHeader}>
             <ThemedText type="title">Workout finished!</ThemedText>
@@ -328,7 +327,7 @@ export default function ActiveWorkoutScreen() {
             rings={goals.map((goal, index) => ({
               progress: currentGoalValue(goal, updatedSessions, cardioSessions, waterEntries) / goal.target,
               color: RingColors[index % RingColors.length],
-              trackColor: colors.backgroundSelected,
+              trackColor: colors.border,
             }))}
           />
 
@@ -340,7 +339,7 @@ export default function ActiveWorkoutScreen() {
 
           <ScrollView style={styles.flex} contentContainerStyle={styles.finishedList}>
             {session.exercises.map((item) => (
-              <ThemedView key={item.exerciseId} type="backgroundElement" style={styles.finishedExercise}>
+              <ThemedView key={item.exerciseId} type="surface" style={styles.finishedExercise}>
                 <ThemedText type="smallBold">{item.name}</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   {item.sets.filter((set) => !set.skipped).length} sets
@@ -350,6 +349,7 @@ export default function ActiveWorkoutScreen() {
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
+            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Return to Home
             </ThemedText>
@@ -364,7 +364,6 @@ export default function ActiveWorkoutScreen() {
 
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.topRow}>
             <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
@@ -419,6 +418,7 @@ export default function ActiveWorkoutScreen() {
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={startExercise}>
+            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Start Exercise
             </ThemedText>
@@ -430,7 +430,6 @@ export default function ActiveWorkoutScreen() {
 
   return (
     <View style={styles.container}>
-      <GlowBackground variant="session" />
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.topRow}>
           <View style={styles.progressBar}>
@@ -442,8 +441,8 @@ export default function ActiveWorkoutScreen() {
                   {
                     backgroundColor:
                       index < setIndex || (index === setIndex && phase !== 'setPending')
-                        ? colors.accent
-                        : colors.backgroundSelected,
+                        ? colors.primary
+                        : colors.surfaceElevated,
                   },
                 ]}
               />
@@ -475,7 +474,7 @@ export default function ActiveWorkoutScreen() {
           )}
 
           {phase === 'setActive' && exerciseKind === 'reps' && (
-            <ThemedView type="backgroundElement" style={styles.setStepperCard}>
+            <ThemedView type="surface" style={styles.setStepperCard}>
               <InlineStepper
                 label="Reps"
                 value={reps}
@@ -524,11 +523,12 @@ export default function ActiveWorkoutScreen() {
         {phase === 'setPending' && (
           <View style={styles.actionRow}>
             <Pressable style={styles.secondaryButton} onPress={skipSet}>
-              <ThemedText type="smallBold" style={{ color: colors.accent }}>
+              <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                 Skip Set
               </ThemedText>
             </Pressable>
             <Pressable style={[styles.primaryButton, styles.flex]} onPress={() => setPhase('setActive')}>
+              <GradientFill />
               <ThemedText type="smallBold" style={styles.primaryButtonText}>
                 Start Set
               </ThemedText>
@@ -538,6 +538,7 @@ export default function ActiveWorkoutScreen() {
 
         {phase === 'setActive' && exerciseKind === 'reps' && (
           <Pressable style={styles.primaryButton} onPress={() => completeSet()}>
+            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Complete Set
             </ThemedText>
@@ -576,7 +577,7 @@ function TargetCard({
   unitSystem: UnitSystem;
 }) {
   return (
-    <ThemedView type="backgroundElement" style={styles.targetCard}>
+    <ThemedView type="surface" style={styles.targetCard}>
       {isWarmup ? (
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.lastTime}>
           WARM-UP
@@ -605,7 +606,7 @@ function TargetCard({
           <View style={styles.targetColumn}>
             <ThemedText type="title" style={styles.targetValue}>
               {toDisplayWeight(targets.weight, unitSystem)}
-              <ThemedText type="small" style={{ color: colors.accentLight }}>
+              <ThemedText type="small" style={{ color: colors.primaryLight }}>
                 {' '}
                 {weightUnitLabel(unitSystem)}
               </ThemedText>
@@ -647,7 +648,7 @@ function EditableExerciseRow({
     <View style={styles.editRow}>
       <ExerciseStatusRow item={item} index={index} status={active ? 'current' : 'upcoming'} unitSystem={unitSystem} />
       <Pressable hitSlop={8} onPress={onBeginEdit}>
-        <SymbolView name="pencil" size={16} tintColor={editing ? colors.accent : colors.textSecondary} />
+        <SymbolView name="pencil" size={16} tintColor={editing ? colors.primaryLight : colors.textSecondary} />
       </Pressable>
     </View>
   );
@@ -668,7 +669,7 @@ function ExerciseEditPanel({
 }) {
   const canSave = draft.name.trim().length > 0;
   return (
-    <ThemedView type="backgroundElement" style={styles.editPanel}>
+    <ThemedView type="surface" style={styles.editPanel}>
       <TextInput
         style={styles.replacementInput}
         value={draft.name}
@@ -779,7 +780,7 @@ function ExerciseEditPanel({
           <SymbolView name="xmark.circle.fill" size={22} tintColor={colors.textSecondary} />
         </Pressable>
         <Pressable hitSlop={8} onPress={onSave} disabled={!canSave}>
-          <SymbolView name="checkmark.circle.fill" size={22} tintColor={canSave ? colors.accent : colors.textSecondary} />
+          <SymbolView name="checkmark.circle.fill" size={22} tintColor={canSave ? colors.primaryLight : colors.textSecondary} />
         </Pressable>
       </View>
     </ThemedView>
@@ -804,11 +805,11 @@ function ExerciseStatusRow({
       <View
         style={[
           styles.statusIcon,
-          isDone && { backgroundColor: colors.accent },
-          isCurrent && { borderColor: colors.accent },
+          isDone && { backgroundColor: colors.primary },
+          isCurrent && { borderColor: colors.primary },
         ]}>
         {isDone ? (
-          <SymbolView name="checkmark" size={12} tintColor={colors.background} />
+          <SymbolView name="checkmark" size={12} tintColor={colors.text} />
         ) : (
           <ThemedText type="small" themeColor="textSecondary">
             {index + 1}
@@ -869,12 +870,12 @@ function CountdownTimer({
       </ThemedText>
       <View style={{ width: size, height: size }}>
         <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
-          <Circle cx={size / 2} cy={size / 2} r={radius} stroke={colors.backgroundSelected} strokeWidth={strokeWidth} fill="none" />
+          <Circle cx={size / 2} cy={size / 2} r={radius} stroke={colors.border} strokeWidth={strokeWidth} fill="none" />
           <Circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
-            stroke={colors.accent}
+            stroke={colors.primary}
             strokeWidth={strokeWidth}
             fill="none"
             strokeLinecap="round"
@@ -893,7 +894,7 @@ function CountdownTimer({
       ) : null}
       {skippable ? (
         <Pressable style={styles.skipButton} onPress={onDone}>
-          <ThemedText type="smallBold" style={{ color: colors.accent }}>
+          <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
             Skip Rest
           </ThemedText>
         </Pressable>
@@ -1105,7 +1106,7 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     borderWidth: 2,
-    borderColor: colors.backgroundSelected,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1118,13 +1119,17 @@ const styles = StyleSheet.create({
   editPanel: {
     flex: 1,
     gap: Spacing.two,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: Spacing.two,
   },
   replacementInput: {
-    borderRadius: Spacing.two,
+    borderRadius: Radius.sm,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     color: colors.text,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
   },
   editControls: {
     flexDirection: 'row',
@@ -1138,8 +1143,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
     padding: Spacing.two,
-    borderRadius: Spacing.two,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
   },
   editActions: {
     flexDirection: 'row',
@@ -1148,24 +1153,26 @@ const styles = StyleSheet.create({
   },
   modeToggle: {
     flexDirection: 'row',
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     padding: Spacing.half,
   },
   modeButton: {
     flex: 1,
     alignItems: 'center',
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.two,
   },
   modeButtonActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   modeTextActive: {
-    color: colors.background,
+    color: colors.text,
   },
   targetCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.four,
     gap: Spacing.three,
     marginBottom: Spacing.three,
@@ -1181,17 +1188,19 @@ const styles = StyleSheet.create({
   targetValue: {
     fontSize: 36,
     lineHeight: 40,
-    color: colors.accentLight,
+    color: colors.primaryLight,
   },
   targetDivider: {
     width: 1,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.border,
   },
   lastTime: {
     textAlign: 'center',
   },
   setStepperCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.four,
     gap: Spacing.four,
     marginBottom: Spacing.three,
@@ -1213,33 +1222,33 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
   setStepperValueButton: {
     flex: 1,
     minHeight: 58,
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
   setStepperValue: {
     fontSize: 34,
     lineHeight: 38,
-    color: colors.accentLight,
+    color: colors.primaryLight,
   },
   setStepperInput: {
     flex: 1,
     minHeight: 58,
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
     paddingHorizontal: Spacing.three,
     textAlign: 'center',
     fontSize: 34,
     lineHeight: 38,
-    color: colors.accentLight,
-    backgroundColor: colors.backgroundSelected,
+    color: colors.primaryLight,
+    backgroundColor: colors.surfaceElevated,
   },
   timerArea: {
     alignItems: 'center',
@@ -1264,21 +1273,21 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   secondaryButton: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.md,
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.four,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.border,
   },
   primaryButton: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
     paddingVertical: Spacing.three,
     alignItems: 'center',
-    backgroundColor: colors.accent,
   },
   primaryButtonText: {
-    color: colors.background,
+    color: colors.text,
     fontSize: 17,
   },
   bottomBar: {
@@ -1287,13 +1296,13 @@ const styles = StyleSheet.create({
   overallTrack: {
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
     overflow: 'hidden',
   },
   overallFill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   bottomStats: {
     flexDirection: 'row',
@@ -1318,7 +1327,9 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   finishedExercise: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     flexDirection: 'row',
     justifyContent: 'space-between',

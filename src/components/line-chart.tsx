@@ -130,7 +130,7 @@ export function LineChart({
         strokeLinecap="round"
       />
       {dots.map((dot, index) => (
-        <Circle key={index} cx={dot.cx} cy={dot.cy} r={6} fill={Colors.background} />
+        <Circle key={index} cx={dot.cx} cy={dot.cy} r={6} fill={Colors.surface} />
       ))}
       {dots.map((dot, index) => (
         <Circle key={`dot-${index}`} cx={dot.cx} cy={dot.cy} r={4} fill={color} />

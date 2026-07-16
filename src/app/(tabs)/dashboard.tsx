@@ -6,11 +6,12 @@ import { SymbolView } from 'expo-symbols';
 
 import { ActivityRings } from '@/components/activity-rings';
 import { Chevron } from '@/components/chevron';
-import { GlowBackground } from '@/components/glow-background';
+import { GradientFill } from '@/components/gradient-fill';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 import { WaterBottle } from '@/components/water-bottle';
-import { BottomTabInset, Colors, MaxContentWidth, RingColors, Spacing } from '@/constants/theme';
+import { BottomTabInset, Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
 import { currentGoalValue, scheduledRoutineTasks, todayKey, todayWaterOunces } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { GoalDef } from '@/lib/store/types';
@@ -57,7 +58,6 @@ export default function DashboardScreen() {
 
   return (
     <TabFadeView style={styles.container}>
-      <GlowBackground variant="home" />
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
@@ -67,17 +67,18 @@ export default function DashboardScreen() {
             </ThemedText>
           </View>
 
-          <View style={styles.todaySection}>
-            <View style={styles.sectionHeader}>
-              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-                TODAY
+          <View style={styles.sectionHeader}>
+            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+              TODAY
+            </ThemedText>
+            <Pressable hitSlop={8} onPress={() => router.push('/logging')}>
+              <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                Edit
               </ThemedText>
-              <Pressable hitSlop={8} onPress={() => router.push('/logging')}>
-                <ThemedText type="small" style={{ color: colors.accent }}>
-                  Edit
-                </ThemedText>
-              </Pressable>
-            </View>
+            </Pressable>
+          </View>
+
+          <ThemedView type="surface" style={styles.todaySection}>
 
             {scheduledTasks.map((task) => {
               const path =
@@ -91,7 +92,7 @@ export default function DashboardScreen() {
                   onPress={() => router.push(path)}
                   disabled={task.completed}>
                   <View style={[styles.checkCircle, task.completed ? styles.checkCircleDone : styles.checkCircleTodo]}>
-                    {task.completed && <SymbolView name="checkmark" size={12} tintColor={colors.background} />}
+                    {task.completed && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
                   </View>
                   <View style={styles.todayText}>
                     <ThemedText type="smallBold">{task.routine.name}</ThemedText>
@@ -106,8 +107,8 @@ export default function DashboardScreen() {
 
             {scheduledTasks.length === 0 && checkoffDefs.length === 0 && (
               <View style={styles.todayRow}>
-                <View style={[styles.todayIcon, { backgroundColor: colors.backgroundSelected }]}>
-                  <SymbolView name="moon.zzz" size={15} tintColor={colors.accentLight} />
+                <View style={[styles.todayIcon, { backgroundColor: colors.primaryTint }]}>
+                  <SymbolView name="moon.zzz" size={15} tintColor={colors.primaryLight} />
                 </View>
                 <View style={styles.todayText}>
                   <ThemedText type="smallBold">Rest day</ThemedText>
@@ -126,10 +127,10 @@ export default function DashboardScreen() {
                     style={[
                       styles.checkCircle,
                       done
-                        ? { backgroundColor: colors.accent }
-                        : { borderWidth: 2, borderColor: colors.backgroundSelected },
+                        ? { backgroundColor: colors.primary }
+                        : { borderWidth: 2, borderColor: colors.border },
                     ]}>
-                    {done && <SymbolView name="checkmark" size={12} tintColor={colors.background} />}
+                    {done && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
                   </View>
                   <ThemedText type="small" themeColor={done ? 'textSecondary' : 'text'} style={styles.checkLabel}>
                     {def.name}
@@ -137,7 +138,7 @@ export default function DashboardScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ThemedView>
 
           <View style={styles.ringsRow}>
             <Pressable onPress={() => router.navigate('/logging')}>
@@ -149,7 +150,7 @@ export default function DashboardScreen() {
                 rings={goals.map((goal, index) => ({
                   progress: currentGoalValue(goal, sessions, cardioSessions, waterEntries) / goal.target,
                   color: RingColors[index % RingColors.length],
-                  trackColor: colors.backgroundSelected,
+                  trackColor: colors.border,
                 }))}
               />
             </Pressable>
@@ -164,7 +165,7 @@ export default function DashboardScreen() {
                 <Pressable
                   style={styles.waterButton}
                   onPress={() => addWater(unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL)}>
-                  <ThemedText type="small" numberOfLines={1} style={{ color: colors.accent }}>
+                  <ThemedText type="small" numberOfLines={1} style={{ color: colors.primaryLight }}>
                     +{unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL} {volumeUnitLabel(unitSystem)}
                   </ThemedText>
                 </Pressable>
@@ -187,8 +188,9 @@ export default function DashboardScreen() {
           )}
 
           <Pressable style={styles.startButton} onPress={() => router.push('/workout/choose')}>
+            <GradientFill />
             <Svg width={14} height={16} viewBox="0 0 14 16">
-              <Path d="M0 0l14 8-14 8z" fill={colors.background} />
+              <Path d="M0 0l14 8-14 8z" fill={colors.text} />
             </Svg>
             <ThemedText type="subtitle" style={styles.startButtonText}>
               Start Workout
@@ -295,12 +297,12 @@ const styles = StyleSheet.create({
   waterButton: {
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.two,
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
   },
   startButton: {
-    backgroundColor: colors.accent,
-    borderRadius: Spacing.five,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
     paddingVertical: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -308,7 +310,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   startButtonText: {
-    color: colors.background,
+    color: colors.text,
     fontSize: 22,
     lineHeight: 28,
   },
@@ -323,6 +325,10 @@ const styles = StyleSheet.create({
   },
   todaySection: {
     gap: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: Spacing.three,
   },
   todayRow: {
     flexDirection: 'row',
@@ -349,11 +355,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkCircleDone: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   checkCircleTodo: {
     borderWidth: 2,
-    borderColor: colors.accentLight,
+    borderColor: colors.textMuted,
   },
   checkLabel: {
     flex: 1,

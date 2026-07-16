@@ -12,11 +12,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GlowBackground } from '@/components/glow-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Colors, Destructive, Spacing } from '@/constants/theme';
+import { BottomTabInset, Colors, Radius, Spacing } from '@/constants/theme';
 import { formatHeight, fromDisplayLength, lengthUnitLabel, toDisplayLength } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
@@ -117,7 +116,6 @@ export default function SettingsScreen() {
 
   return (
     <TabFadeView style={styles.container}>
-      <GlowBackground variant="cool" />
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.flex}
@@ -147,7 +145,7 @@ export default function SettingsScreen() {
               </View>
               {!isEditing && (
                 <Pressable hitSlop={8} onPress={startEditing}>
-                  <ThemedText type="small" style={{ color: colors.accent }}>
+                  <ThemedText type="small" style={{ color: colors.primaryLight }}>
                     Edit
                   </ThemedText>
                 </Pressable>
@@ -155,7 +153,7 @@ export default function SettingsScreen() {
             </View>
 
             {isEditing && (
-              <ThemedView type="backgroundElement" style={styles.editCard}>
+              <ThemedView type="surface" style={styles.editCard}>
                 <ProfileField label="Name" value={draftName} onChangeText={setDraftName} />
                 <ProfileField
                   label="Birthday"
@@ -182,7 +180,7 @@ export default function SettingsScreen() {
                           key={option}
                           style={[styles.sexButton, active && styles.sexButtonActive]}
                           onPress={() => setDraftSex(option)}>
-                          <ThemedText type="small" style={active ? { color: colors.background } : undefined}>
+                          <ThemedText type="small" style={active ? { color: colors.text } : undefined}>
                             {option === 'male' ? 'Male' : option === 'female' ? 'Female' : 'Skip'}
                           </ThemedText>
                         </Pressable>
@@ -218,7 +216,7 @@ export default function SettingsScreen() {
                     style={[styles.saveButton, isSaving && styles.disabled]}
                     disabled={isSaving}
                     onPress={handleSave}>
-                    <ThemedText type="smallBold" style={{ color: colors.background }}>
+                    <ThemedText type="smallBold" style={{ color: colors.text }}>
                       {isSaving ? 'Saving…' : 'Save'}
                     </ThemedText>
                   </Pressable>
@@ -236,13 +234,13 @@ export default function SettingsScreen() {
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
                 UNITS
               </ThemedText>
-              <ThemedView type="backgroundElement" style={[styles.section, styles.row]}>
+              <ThemedView type="surface" style={[styles.section, styles.row]}>
                 <ThemedText type="small">Measurement system</ThemedText>
                 <UnitToggle value={preferences.unitSystem} onChange={(unitSystem) => setPreferences({ unitSystem })} />
               </ThemedView>
             </View>
 
-            <ThemedView type="backgroundElement" style={[styles.section, styles.row]}>
+            <ThemedView type="surface" style={[styles.section, styles.row]}>
               <View style={styles.rowText}>
                 <ThemedText type="smallBold">Apple Health</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
@@ -339,7 +337,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -349,7 +347,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarText: {
-    color: colors.background,
+    color: colors.text,
     fontSize: 22,
     lineHeight: 26,
   },
@@ -357,7 +355,9 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   editCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     gap: Spacing.three,
   },
@@ -365,27 +365,27 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   fieldInput: {
-    borderRadius: Spacing.two,
+    borderRadius: Radius.sm,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     fontSize: 15,
     color: colors.text,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
   },
   sexToggle: {
     flexDirection: 'row',
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     padding: Spacing.half,
   },
   sexButton: {
     flex: 1,
     alignItems: 'center',
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.two,
   },
   sexButtonActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   editButtons: {
     flexDirection: 'row',
@@ -397,10 +397,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   saveButton: {
-    borderRadius: Spacing.two,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.four,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   disabled: {
     opacity: 0.6,
@@ -412,20 +412,22 @@ const styles = StyleSheet.create({
   },
   unitToggle: {
     flexDirection: 'row',
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     padding: Spacing.half,
   },
   unitButton: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.three,
   },
   unitButtonActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   section: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     gap: Spacing.half,
@@ -440,19 +442,19 @@ const styles = StyleSheet.create({
     gap: Spacing.half,
   },
   logoutButton: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
     paddingVertical: Spacing.three,
     alignItems: 'center',
-    backgroundColor: Destructive,
+    backgroundColor: colors.danger,
   },
   logoutText: {
-    color: '#ffffff',
+    color: colors.text,
   },
   info: {
-    color: '#30a46c',
+    color: colors.success,
   },
   error: {
-    color: Destructive,
+    color: colors.danger,
     textAlign: 'center',
   },
 });

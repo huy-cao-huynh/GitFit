@@ -3,10 +3,9 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
-import { GlowBackground } from '@/components/glow-background';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import type { SessionExercise } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
@@ -28,7 +27,6 @@ export default function HistoryDetailScreen() {
   if (!session) {
     return (
       <View style={styles.container}>
-        <GlowBackground variant="cool" />
         <SafeAreaView style={styles.safeArea}>
           <ThemedText type="subtitle">Workout not found</ThemedText>
           <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -43,11 +41,10 @@ export default function HistoryDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <GlowBackground variant="cool" />
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.headerRow}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backButton}>
-            <SymbolView name="chevron.left" size={18} tintColor={colors.accent} />
+            <SymbolView name="chevron.left" size={18} tintColor={colors.primaryLight} />
           </Pressable>
           <ThemedText type="small" themeColor="textSecondary">
             {formatDate(session.date)}
@@ -94,7 +91,7 @@ function SummaryStat({ value, unit, label }: { value: string; unit: string; labe
 
 function ExerciseCard({ exercise }: { exercise: SessionExercise }) {
   return (
-    <ThemedView type="backgroundElement" style={styles.exerciseCard}>
+    <ThemedView type="surface" style={styles.exerciseCard}>
       <ThemedText type="smallBold">{exercise.name}</ThemedText>
       {exercise.sets.map((set, index) => (
         <View key={index} style={[styles.setRow, index > 0 && styles.setRowDivider]}>
@@ -173,7 +170,9 @@ const styles = StyleSheet.create({
     lineHeight: 30,
   },
   exerciseCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     gap: Spacing.two,
   },

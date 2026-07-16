@@ -1,6 +1,6 @@
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
 
-import { Colors, Fonts, Palette, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Spacing } from '@/constants/theme';
 import { toDateKey } from '@/lib/store/derive';
 import type { CardioSession, Session } from '@/lib/store/types';
 
@@ -59,7 +59,7 @@ export function ContributionGrid({
       cells.push({
         x: week * (cellSize + GAP),
         y: LABEL_HEIGHT + day * (cellSize + GAP),
-        fill: minutes > 0 ? Palette.periwinkle : 'rgba(255,255,255,0.07)',
+        fill: minutes > 0 ? Colors.primary : Colors.border,
         opacity: minutes === 0 ? 1 : minutes < 30 ? 0.45 : minutes < 45 ? 0.75 : 1,
       });
     }

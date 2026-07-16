@@ -5,12 +5,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Fonts, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Motion, Radius } from '@/constants/theme';
 
 const BAR_HEIGHT = 56;
 const INDICATOR_WIDTH = 64;
 const INDICATOR_HEIGHT = 44;
-const SLIDE = { duration: 160 };
+const SLIDE = { duration: Motion.base };
 
 const TAB_ICONS: Record<string, SFSymbol> = {
   dashboard: 'house.fill',
@@ -21,10 +21,10 @@ const TAB_ICONS: Record<string, SFSymbol> = {
 };
 
 /**
- * Floating dark pill replacing the native tab bar, with a periwinkle
- * indicator that shifts directly between tabs.
+ * Anchored matte tab bar: opaque surface with a thin top border and a subtle
+ * elevated pill that slides behind the active tab.
  */
-export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const [barWidth, setBarWidth] = useState(0);
   const indicatorX = useSharedValue(-INDICATOR_WIDTH);
@@ -42,13 +42,15 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
   }));
 
   return (
-    <View style={[styles.bar, { bottom: insets.bottom + Spacing.two }]} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}>
+    <View
+      style={[styles.bar, { height: BAR_HEIGHT + insets.bottom, paddingBottom: insets.bottom }]}
+      onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}>
       {barWidth > 0 && <Animated.View style={[styles.indicator, indicatorStyle]} />}
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const label = options.title ?? route.name;
         const isFocused = state.index === index;
-        const color = isFocused ? Colors.accent : Colors.textSecondary;
+        const color = isFocused ? Colors.primaryLight : Colors.textMuted;
 
         const onPress = () => {
           const event = navigation.emit({
@@ -85,31 +87,29 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
 const styles = StyleSheet.create({
   bar: {
     position: 'absolute',
-    left: Spacing.three,
-    right: Spacing.three,
-    height: BAR_HEIGHT,
-    borderRadius: BAR_HEIGHT / 2,
-    backgroundColor: 'rgba(20,17,30,0.94)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    overflow: 'hidden',
   },
   indicator: {
     position: 'absolute',
     width: INDICATOR_WIDTH,
     height: INDICATOR_HEIGHT,
-    borderRadius: INDICATOR_HEIGHT / 2,
+    borderRadius: Radius.md,
     top: (BAR_HEIGHT - INDICATOR_HEIGHT) / 2,
-    backgroundColor: Colors.backgroundSelected,
+    backgroundColor: Colors.surfaceElevated,
   },
   tab: {
+    height: BAR_HEIGHT,
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
-    height: '100%',
   },
   label: {
     fontFamily: Fonts.medium,

@@ -12,7 +12,11 @@ type AuthContextValue = {
   isLoading: boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   /** Resolves with the new session, or null when email confirmation is still required. */
-  signUpWithEmail: (email: string, password: string) => Promise<Session | null>;
+  signUpWithEmail: (
+    email: string,
+    password: string,
+    metadata?: Record<string, string>
+  ) => Promise<Session | null>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   /** Merges keys (full_name, birthday, …) into Supabase user_metadata. */
@@ -74,8 +78,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (error) throw error;
   };
 
-  const signUpWithEmail = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    metadata?: Record<string, string>
+  ) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: metadata ? { data: metadata } : undefined,
+    });
     if (error) throw error;
     return data.session;
   };

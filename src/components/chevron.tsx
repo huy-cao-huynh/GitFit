@@ -1,6 +1,8 @@
 import Svg, { Path } from 'react-native-svg';
 
-export function Chevron({ color = '#ccc' }: { color?: string }) {
+import { Colors } from '@/constants/theme';
+
+export function Chevron({ color = Colors.textSecondary }: { color?: string }) {
   return (
     <Svg width={8} height={14} viewBox="0 0 8 14">
       <Path

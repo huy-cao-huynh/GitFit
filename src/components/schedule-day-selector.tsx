@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Spacing } from '@/constants/theme';
+import { Colors, Radius, Spacing } from '@/constants/theme';
 import { WEEKDAY_OPTIONS } from '@/lib/store/derive';
 import type { Weekday } from '@/lib/store/types';
 
@@ -36,7 +36,7 @@ export function ScheduleDaySelector({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.icon}>
-          <SymbolView name="calendar" size={16} tintColor={colors.accent} />
+          <SymbolView name="calendar" size={16} tintColor={colors.primaryLight} />
         </View>
         <View style={styles.headerText}>
           <ThemedText type="smallBold">Schedule</ThemedText>
@@ -89,10 +89,12 @@ export function ScheduleDaySelector({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
     padding: Spacing.three,
     gap: Spacing.three,
-    backgroundColor: colors.backgroundElement,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   headerRow: {
     flexDirection: 'row',
@@ -105,7 +107,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.primaryTint,
   },
   headerText: {
     flex: 1,
@@ -113,21 +115,21 @@ const styles = StyleSheet.create({
   },
   modeToggle: {
     flexDirection: 'row',
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     padding: Spacing.half,
   },
   modeButton: {
     flex: 1,
     alignItems: 'center',
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.two,
   },
   modeButtonActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   modeTextActive: {
-    color: colors.background,
+    color: colors.text,
   },
   daysRow: {
     flexDirection: 'row',
@@ -142,13 +144,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
   },
   dayChipActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   dayTextActive: {
-    color: colors.background,
+    color: colors.text,
   },
 });

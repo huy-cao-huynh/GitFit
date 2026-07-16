@@ -7,7 +7,7 @@ import { SymbolView } from 'expo-symbols';
 import { ScheduleDaySelector } from '@/components/schedule-day-selector';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Destructive, MaxContentWidth, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { makeId } from '@/lib/store/id';
 import type { CardioActivityType, Routine, Weekday } from '@/lib/store/types';
 import { distanceUnitLabel, fromDisplayDistance, toDisplayDistance } from '@/lib/units';
@@ -53,7 +53,7 @@ export default function CardioRoutineEditorScreen() {
       name: name.trim(),
       level: existing?.level ?? 'Custom',
       durationMinutes: targetMinutes,
-      tileColor: existing?.tileColor ?? 'rgba(247,184,1,0.22)',
+      tileColor: existing?.tileColor ?? Colors.primaryTint,
       scheduledDays,
       exercises: [],
       activityType,
@@ -78,13 +78,13 @@ export default function CardioRoutineEditorScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.headerRow}>
           <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ThemedText type="link" style={{ color: colors.accent }}>
+            <ThemedText type="link" style={{ color: colors.primaryLight }}>
               Cancel
             </ThemedText>
           </Pressable>
           <ThemedText type="smallBold">{isNew ? 'New Cardio Workout' : 'Edit Cardio Workout'}</ThemedText>
           <Pressable onPress={handleSave} hitSlop={12} disabled={!canSave}>
-            <ThemedText type="link" style={{ color: colors.accent, opacity: canSave ? 1 : 0.4 }}>
+            <ThemedText type="link" style={{ color: colors.primaryLight, opacity: canSave ? 1 : 0.4 }}>
               Save
             </ThemedText>
           </Pressable>
@@ -112,7 +112,7 @@ export default function CardioRoutineEditorScreen() {
                   key={option}
                   style={[styles.activityChip, active && styles.activityChipActive]}
                   onPress={() => setActivityType(option)}>
-                  <ThemedText type="small" style={active ? { color: colors.background } : undefined}>
+                  <ThemedText type="small" style={active ? { color: colors.text } : undefined}>
                     {ACTIVITY_LABELS[option]}
                   </ThemedText>
                 </Pressable>
@@ -120,7 +120,7 @@ export default function CardioRoutineEditorScreen() {
             })}
           </View>
 
-          <ThemedView type="backgroundElement" style={styles.card}>
+          <ThemedView type="surface" style={styles.card}>
             <Stepper
               label="Target time"
               value={targetMinutes}
@@ -131,8 +131,8 @@ export default function CardioRoutineEditorScreen() {
             />
             <View style={[styles.distanceRow, styles.rowDivider]}>
               <Pressable style={styles.goalToggle} onPress={() => setHasTargetDistance((v) => !v)} hitSlop={6}>
-                <View style={[styles.checkCircle, hasTargetDistance ? { backgroundColor: colors.accent } : styles.checkCircleOff]}>
-                  {hasTargetDistance && <SymbolView name="checkmark" size={12} tintColor={colors.background} />}
+                <View style={[styles.checkCircle, hasTargetDistance ? { backgroundColor: colors.primary } : styles.checkCircleOff]}>
+                  {hasTargetDistance && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
                 </View>
                 <ThemedText type="small">Target distance</ThemedText>
               </Pressable>
@@ -236,12 +236,14 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.six,
   },
   nameInput: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 18,
     color: colors.text,
-    backgroundColor: colors.backgroundElement,
+    backgroundColor: colors.surface,
   },
   sectionLabel: {
     textTransform: 'uppercase',
@@ -255,14 +257,16 @@ const styles = StyleSheet.create({
   activityChip: {
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
-    borderRadius: Spacing.five,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.full,
+    backgroundColor: colors.surfaceElevated,
   },
   activityChipActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   card: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: Spacing.three,
   },
   stepper: {
@@ -281,7 +285,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -316,14 +320,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   deleteButton: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
     paddingVertical: Spacing.three,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Destructive,
+    borderColor: colors.danger,
     marginTop: Spacing.three,
   },
   deleteText: {
-    color: Destructive,
+    color: colors.danger,
   },
 });

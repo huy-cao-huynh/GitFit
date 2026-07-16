@@ -16,7 +16,7 @@ import { ScheduleDaySelector } from '@/components/schedule-day-selector';
 import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Destructive, MaxContentWidth, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, Routine, RoutineExercise, Weekday } from '@/lib/store/types';
 import { fromDisplayWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
@@ -114,7 +114,7 @@ export default function RoutineEditorScreen() {
       name: name.trim(),
       level: existing?.level ?? 'Custom',
       durationMinutes: Math.max(10, Math.round((totalSets * 3) / 5) * 5),
-      tileColor: existing?.tileColor ?? 'rgba(118,120,237,0.25)',
+      tileColor: existing?.tileColor ?? Colors.primaryTint,
       scheduledDays,
       exercises: validExercises.map((exercise) => ({ ...exercise, name: exercise.name.trim() })),
     };
@@ -137,13 +137,13 @@ export default function RoutineEditorScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.headerRow}>
           <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ThemedText type="link" style={{ color: colors.accent }}>
+            <ThemedText type="link" style={{ color: colors.primaryLight }}>
               Cancel
             </ThemedText>
           </Pressable>
           <ThemedText type="smallBold">{isNew ? 'New Workout' : 'Edit Workout'}</ThemedText>
           <Pressable onPress={handleSave} hitSlop={12} disabled={!canSave}>
-            <ThemedText type="link" style={{ color: colors.accent, opacity: canSave ? 1 : 0.4 }}>
+            <ThemedText type="link" style={{ color: colors.primaryLight, opacity: canSave ? 1 : 0.4 }}>
               Save
             </ThemedText>
           </Pressable>
@@ -168,7 +168,7 @@ export default function RoutineEditorScreen() {
             </ThemedText>
 
             {exercises.map((exercise) => (
-              <ThemedView key={exercise.id} type="backgroundElement" style={styles.exerciseCard}>
+              <ThemedView key={exercise.id} type="surface" style={styles.exerciseCard}>
                 <View style={styles.exerciseHeader}>
                   <TextInput
                     style={styles.exerciseNameInput}
@@ -194,8 +194,8 @@ export default function RoutineEditorScreen() {
                   {exercise.warmupSets === 0 ? (
                     <View style={styles.setActionsRow}>
                       <Pressable style={styles.addWarmupButton} onPress={() => addWarmupSet(exercise)}>
-                        <SymbolView name="plus.circle.fill" size={16} tintColor={colors.accent} />
-                        <ThemedText type="smallBold" style={{ color: colors.accent }}>
+                        <SymbolView name="plus.circle.fill" size={16} tintColor={colors.primaryLight} />
+                        <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                           Warm-up
                         </ThemedText>
                       </Pressable>
@@ -313,8 +313,8 @@ export default function RoutineEditorScreen() {
             <Pressable
               style={styles.addRow}
               onPress={() => setExercises((current) => [...current, blankExercise()])}>
-              <SymbolView name="plus.circle.fill" size={20} tintColor={colors.accent} />
-              <ThemedText type="smallBold" style={{ color: colors.accent }}>
+              <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+              <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                 Add Exercise
               </ThemedText>
             </Pressable>
@@ -380,19 +380,23 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.six,
   },
   nameInput: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 18,
     color: colors.text,
-    backgroundColor: colors.backgroundElement,
+    backgroundColor: colors.surface,
   },
   sectionLabel: {
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   exerciseCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     gap: Spacing.three,
   },
@@ -424,8 +428,8 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.two,
-    borderRadius: Spacing.two,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
   },
   warmupGroup: {
     width: '100%',
@@ -435,8 +439,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-evenly',
     gap: Spacing.three,
     padding: Spacing.two,
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
   },
   warmupHeader: {
     width: '100%',
@@ -457,21 +461,21 @@ const styles = StyleSheet.create({
   modeToggle: {
     width: '100%',
     flexDirection: 'row',
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     padding: Spacing.half,
   },
   modeButton: {
     flex: 1,
     alignItems: 'center',
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
     paddingVertical: Spacing.two,
   },
   modeButtonActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
   },
   modeTextActive: {
-    color: colors.background,
+    color: colors.text,
   },
   addRow: {
     flexDirection: 'row',
@@ -481,14 +485,14 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   deleteButton: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
     paddingVertical: Spacing.three,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Destructive,
+    borderColor: colors.danger,
     marginTop: Spacing.three,
   },
   deleteText: {
-    color: Destructive,
+    color: colors.danger,
   },
 });

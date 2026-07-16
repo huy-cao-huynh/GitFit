@@ -11,13 +11,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
-import { GlowBackground } from '@/components/glow-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Colors, MaxContentWidth, Palette, Spacing } from '@/constants/theme';
+import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import {
   ageFromBirthday,
   bmi,
@@ -209,7 +207,6 @@ export default function LoggingScreen() {
 
   return (
     <TabFadeView style={styles.container}>
-      <GlowBackground variant="cool" />
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.scrollWrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView style={styles.scrollWrap} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -223,7 +220,7 @@ export default function LoggingScreen() {
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
               WORKOUT CALENDAR
             </ThemedText>
-            <ThemedView type="backgroundElement" style={styles.calendarCard}>
+            <ThemedView type="surface" style={styles.calendarCard}>
               <View style={styles.calendarRow}>
                 {calendarDays.map((day) => {
                   const selected = day.date === selectedDate;
@@ -238,29 +235,14 @@ export default function LoggingScreen() {
                           {day.label}
                         </ThemedText>
                       </View>
-                      <View style={styles.calendarBubbleGlow}>
-                        {selected && (
-                          <Svg
-                            pointerEvents="none"
-                            style={styles.calendarBubbleSelected}
-                            width={48}
-                            height={48}>
-                            <Defs>
-                              <RadialGradient id="calendarSelectedGlow" cx="50%" cy="50%" r="50%">
-                                <Stop offset="0%" stopColor={Palette.purple} stopOpacity={0.35} />
-                                <Stop offset="60%" stopColor={Palette.purple} stopOpacity={0.14} />
-                                <Stop offset="100%" stopColor={Palette.purple} stopOpacity={0} />
-                              </RadialGradient>
-                            </Defs>
-                            <Rect x={0} y={0} width={48} height={48} fill="url(#calendarSelectedGlow)" />
-                          </Svg>
-                        )}
+                      <View style={styles.calendarBubbleSlot}>
                         <View
                           style={[
                             styles.calendarBubble,
                             complete && styles.calendarBubbleDone,
                             todo && !missed && styles.calendarBubbleTodo,
                             missed && styles.calendarBubbleMissed,
+                            selected && styles.calendarBubbleSelected,
                           ]}>
                           <ThemedText
                             type="smallBold"
@@ -332,7 +314,7 @@ export default function LoggingScreen() {
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
               WEEKLY GOALS
             </ThemedText>
-            <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedView type="surface" style={styles.card}>
               {BUILTIN_GOALS.map((meta, index) => {
                 const goal = goals.find((g) => g.type === meta.type);
                 const displayTarget = goal ? (meta.isVolume ? toDisplayVolume(goal.target, unitSystem) : goal.target) : meta.defaultTarget;
@@ -343,8 +325,8 @@ export default function LoggingScreen() {
                       style={styles.goalToggle}
                       onPress={() => toggleBuiltinGoal(meta)}
                       hitSlop={6}>
-                      <View style={[styles.checkCircle, goal ? { backgroundColor: colors.accent } : styles.checkCircleOff]}>
-                        {goal && <SymbolView name="checkmark" size={12} tintColor={colors.background} />}
+                      <View style={[styles.checkCircle, goal ? { backgroundColor: colors.primary } : styles.checkCircleOff]}>
+                        {goal && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
                       </View>
                       <ThemedText type="small">{meta.label}</ThemedText>
                     </Pressable>
@@ -395,7 +377,7 @@ export default function LoggingScreen() {
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
               TODAY
             </ThemedText>
-            <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedView type="surface" style={styles.card}>
               {checkoffDefs.map((def, index) => {
                 const done = doneToday.includes(def.id);
                 return (
@@ -406,9 +388,9 @@ export default function LoggingScreen() {
                     <View
                       style={[
                         styles.checkCircle,
-                        done ? { backgroundColor: colors.accent } : { borderWidth: 2, borderColor: colors.border },
+                        done ? { backgroundColor: colors.primary } : { borderWidth: 2, borderColor: colors.border },
                       ]}>
-                      {done && <SymbolView name="checkmark" size={12} tintColor={colors.background} />}
+                      {done && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
                     </View>
                     <ThemedText type="small" style={styles.flex}>
                       {def.name}
@@ -440,7 +422,7 @@ export default function LoggingScreen() {
                 <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
                   WATER
                 </ThemedText>
-                <ThemedView type="backgroundElement" style={styles.card}>
+                <ThemedView type="surface" style={styles.card}>
                   <View style={styles.waterRow}>
                     <ThemedText type="subtitle">{formatVolume(todayWater, unitSystem)}</ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
@@ -450,7 +432,7 @@ export default function LoggingScreen() {
                   <Pressable
                     style={styles.quickAddButton}
                     onPress={() => addWater(unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL)}>
-                    <ThemedText type="smallBold" style={{ color: colors.accent }}>
+                    <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                       +{unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL} {volumeUnitLabel(unitSystem)}
                     </ThemedText>
                   </Pressable>
@@ -467,7 +449,7 @@ export default function LoggingScreen() {
                       <SymbolView
                         name="minus.circle.fill"
                         size={24}
-                        tintColor={customWater.trim() ? colors.textSecondary : colors.backgroundSelected}
+                        tintColor={customWater.trim() ? colors.textSecondary : colors.textMuted}
                       />
                     </Pressable>
                     <IconButton icon="plus.circle.fill" active={!!customWater.trim()} onPress={() => addCustomWater(1)} />
@@ -494,7 +476,7 @@ export default function LoggingScreen() {
                 canSave={!!weight.trim()}
               />
 
-              <ThemedView type="backgroundElement" style={styles.logCard}>
+              <ThemedView type="surface" style={styles.logCard}>
                 <ThemedText type="smallBold">BMI &amp; Body Fat</ThemedText>
                 {bmiValue !== null ? (
                   <>
@@ -547,7 +529,7 @@ export default function LoggingScreen() {
                 );
               })}
 
-              <ThemedView type="backgroundElement" style={styles.logCard}>
+              <ThemedView type="surface" style={styles.logCard}>
                 <ThemedText type="smallBold">Add measurement section</ThemedText>
                 <View style={styles.splitRow}>
                   <TextInput
@@ -591,7 +573,7 @@ function QuickLogCard({
   onRemove?: () => void;
 }) {
   return (
-    <ThemedView type="backgroundElement" style={styles.logCard}>
+    <ThemedView type="surface" style={styles.logCard}>
       <View style={styles.cardHeader}>
         <View style={styles.flex}>
           <ThemedText type="smallBold">{title}</ThemedText>
@@ -614,7 +596,7 @@ function QuickLogCard({
 function IconButton({ icon, active, onPress }: { icon: 'plus.circle.fill' | 'checkmark.circle.fill'; active: boolean; onPress: () => void }) {
   return (
     <Pressable hitSlop={8} onPress={onPress} disabled={!active}>
-      <SymbolView name={icon} size={24} tintColor={active ? colors.accent : colors.backgroundSelected} />
+      <SymbolView name={icon} size={24} tintColor={active ? colors.primaryLight : colors.textMuted} />
     </Pressable>
   );
 }
@@ -654,11 +636,15 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
   },
   card: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: Spacing.three,
   },
   calendarCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     gap: Spacing.three,
   },
@@ -680,18 +666,16 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Palette.orange,
+    backgroundColor: colors.primaryLight,
   },
   todayMarkerHidden: {
     opacity: 0,
   },
-  calendarBubbleGlow: {
+  calendarBubbleSlot: {
     width: 44,
     height: 44,
-    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
   calendarBubble: {
     width: 36,
@@ -703,25 +687,24 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   calendarBubbleSelected: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
+    borderWidth: 2,
+    borderColor: colors.primaryLight,
   },
   calendarBubbleDone: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   calendarBubbleTodo: {
     borderWidth: 2,
-    borderColor: colors.accentLight,
+    borderColor: colors.textSecondary,
   },
   calendarBubbleMissed: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.surfaceElevated,
     borderWidth: 2,
-    borderColor: 'rgba(142,138,166,0.45)',
+    borderColor: colors.border,
   },
   calendarNumberDone: {
-    color: colors.background,
+    color: colors.text,
   },
   calendarNumberMissed: {
     color: colors.textSecondary,
@@ -762,8 +745,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 2,
     paddingHorizontal: Spacing.two,
-    borderRadius: Spacing.two,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
     color: colors.text,
     fontSize: 14,
   },
@@ -771,7 +754,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -803,11 +786,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
   },
   textInput: {
-    borderRadius: Spacing.two,
+    borderRadius: Radius.sm,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     color: colors.text,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
     fontSize: 14,
   },
   waterRow: {
@@ -822,8 +805,8 @@ const styles = StyleSheet.create({
   quickAddButton: {
     alignItems: 'center',
     paddingVertical: Spacing.two,
-    borderRadius: Spacing.three,
-    backgroundColor: colors.backgroundSelected,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
     marginTop: Spacing.two,
     marginBottom: Spacing.three,
   },
@@ -831,7 +814,9 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   logCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     gap: Spacing.two,
   },

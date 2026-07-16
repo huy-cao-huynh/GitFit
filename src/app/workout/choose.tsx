@@ -6,7 +6,7 @@ import Svg, { Rect } from 'react-native-svg';
 import { Chevron } from '@/components/chevron';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { scheduledRoutineTasks, todayKey } from '@/lib/store/derive';
 import type { Routine } from '@/lib/store/types';
 import { formatDistance } from '@/lib/units';
@@ -42,7 +42,7 @@ export default function ChooseWorkoutScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.headerRow}>
           <Pressable onPress={() => router.back()}>
-            <ThemedText type="link" style={{ color: colors.accent }}>
+            <ThemedText type="link" style={{ color: colors.primaryLight }}>
               Cancel
             </ThemedText>
           </Pressable>
@@ -61,7 +61,7 @@ export default function ChooseWorkoutScreen() {
                 <View style={styles.createIcon}>
                   <ThemedText style={styles.createIconText}>+</ThemedText>
                 </View>
-                <ThemedText type="smallBold" style={{ color: colors.accent }}>
+                <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                   New Strength
                 </ThemedText>
               </Pressable>
@@ -69,7 +69,7 @@ export default function ChooseWorkoutScreen() {
                 <View style={styles.createIcon}>
                   <ThemedText style={styles.createIconText}>+</ThemedText>
                 </View>
-                <ThemedText type="smallBold" style={{ color: colors.accent }}>
+                <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                   New Cardio
                 </ThemedText>
               </Pressable>
@@ -109,10 +109,10 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
 
   return (
     <Pressable onPress={goToPlay}>
-      <ThemedView type="backgroundElement" style={styles.routineCard}>
-        <View style={[styles.routineIcon, { backgroundColor: routine.tileColor }]}>
+      <ThemedView type="surface" style={styles.routineCard}>
+        <View style={styles.routineIcon}>
           <Svg width={20} height={20} viewBox="0 0 20 20">
-            <Rect x={3} y={3} width={14} height={14} rx={3} fill="none" stroke={colors.accent} strokeWidth={2} />
+            <Rect x={3} y={3} width={14} height={14} rx={3} fill="none" stroke={colors.primaryLight} strokeWidth={2} />
           </Svg>
         </View>
         <View style={styles.routineText}>
@@ -121,7 +121,7 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
             {subtitle}
           </ThemedText>
         </View>
-        <Chevron color={colors.backgroundSelected} />
+        <Chevron color={colors.textMuted} />
       </ThemedView>
     </Pressable>
   );
@@ -171,10 +171,10 @@ const styles = StyleSheet.create({
   },
   createOption: {
     flex: 1,
-    borderWidth: 2,
+    borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: colors.accent,
-    borderRadius: Spacing.four,
+    borderColor: colors.textMuted,
+    borderRadius: Radius.lg,
     padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -184,17 +184,19 @@ const styles = StyleSheet.create({
   createIcon: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.accent,
+    borderRadius: Radius.full,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   createIconText: {
-    color: '#ffffff',
+    color: colors.text,
     fontSize: 20,
   },
   routineCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -203,7 +205,8 @@ const styles = StyleSheet.create({
   routineIcon: {
     width: 44,
     height: 44,
-    borderRadius: Spacing.three,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.primaryTint,
     alignItems: 'center',
     justifyContent: 'center',
   },

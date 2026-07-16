@@ -13,9 +13,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { Colors, Spacing } from '@/constants/theme';
+import { Colors, Motion, Spacing } from '@/constants/theme';
 
-const REORDER_TIMING = { duration: 120 };
+const REORDER_TIMING = { duration: Motion.fast };
 
 interface SortableListProps<T> {
   items: T[];

@@ -4,10 +4,10 @@ import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActivityRings } from '@/components/activity-rings';
-import { GlowBackground } from '@/components/glow-background';
+import { GradientFill } from '@/components/gradient-fill';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, RingColors, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
 import { currentGoalValue, estimateCardioCalories, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { CardioSession } from '@/lib/store/types';
@@ -42,10 +42,10 @@ export default function CardioSessionScreen() {
   if (!routine) {
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <ThemedText type="subtitle">Workout not found</ThemedText>
           <Pressable style={styles.primaryButton} onPress={() => router.back()}>
+            <GradientFill />
             <ThemedText style={styles.primaryButtonText}>Back</ThemedText>
           </Pressable>
         </SafeAreaView>
@@ -89,7 +89,6 @@ export default function CardioSessionScreen() {
 
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.finishedHeader}>
             <ThemedText type="title">Workout finished!</ThemedText>
@@ -106,7 +105,7 @@ export default function CardioSessionScreen() {
             rings={goals.map((goal, index) => ({
               progress: currentGoalValue(goal, sessions, updatedCardioSessions, waterEntries) / goal.target,
               color: RingColors[index % RingColors.length],
-              trackColor: colors.backgroundSelected,
+              trackColor: colors.border,
             }))}
           />
 
@@ -123,6 +122,7 @@ export default function CardioSessionScreen() {
           </View>
 
           <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
+            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Return to Home
             </ThemedText>
@@ -135,7 +135,6 @@ export default function CardioSessionScreen() {
   if (phase === 'enteringDistance') {
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.exerciseHeader}>
             <ThemedText type="smallBold" themeColor="textSecondary">
@@ -144,7 +143,7 @@ export default function CardioSessionScreen() {
             <ThemedText type="subtitle">How far did you go?</ThemedText>
           </View>
 
-          <ThemedView type="backgroundElement" style={styles.distanceCard}>
+          <ThemedView type="surface" style={styles.distanceCard}>
             <TextInput
               style={styles.distanceInput}
               placeholder={`Distance (${distanceUnitLabel(unitSystem)}, optional)`}
@@ -156,6 +155,7 @@ export default function CardioSessionScreen() {
           </ThemedView>
 
           <Pressable style={styles.primaryButton} onPress={saveSession}>
+            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Save Workout
             </ThemedText>
@@ -168,7 +168,6 @@ export default function CardioSessionScreen() {
   if (phase === 'active') {
     return (
       <View style={styles.container}>
-        <GlowBackground variant="session" />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.topRow}>
             <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
@@ -196,6 +195,7 @@ export default function CardioSessionScreen() {
           </View>
 
           <Pressable style={styles.primaryButton} onPress={requestEnd}>
+            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               End Workout
             </ThemedText>
@@ -207,7 +207,6 @@ export default function CardioSessionScreen() {
 
   return (
     <View style={styles.container}>
-      <GlowBackground variant="session" />
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.topRow}>
           <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
@@ -221,7 +220,7 @@ export default function CardioSessionScreen() {
         </View>
 
         <ScrollView style={styles.flex} contentContainerStyle={styles.overviewContent}>
-          <ThemedView type="backgroundElement" style={styles.targetCard}>
+          <ThemedView type="surface" style={styles.targetCard}>
             <View style={styles.targetColumn}>
               <ThemedText type="title" style={styles.targetValue}>
                 {routine.durationMinutes}
@@ -236,7 +235,7 @@ export default function CardioSessionScreen() {
                 <View style={styles.targetColumn}>
                   <ThemedText type="title" style={styles.targetValue}>
                     {toDisplayDistance(routine.targetDistanceMiles, unitSystem)}
-                    <ThemedText type="small" style={{ color: colors.accentLight }}>
+                    <ThemedText type="small" style={{ color: colors.primaryLight }}>
                       {' '}
                       {distanceUnitLabel(unitSystem)}
                     </ThemedText>
@@ -251,6 +250,7 @@ export default function CardioSessionScreen() {
         </ScrollView>
 
         <Pressable style={styles.primaryButton} onPress={start}>
+          <GradientFill />
           <ThemedText type="smallBold" style={styles.primaryButtonText}>
             Start
           </ThemedText>
@@ -314,7 +314,9 @@ const styles = StyleSheet.create({
     gap: Spacing.half,
   },
   targetCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.four,
     flexDirection: 'row',
     gap: Spacing.four,
@@ -326,11 +328,11 @@ const styles = StyleSheet.create({
   targetValue: {
     fontSize: 36,
     lineHeight: 40,
-    color: colors.accentLight,
+    color: colors.primaryLight,
   },
   targetDivider: {
     width: 1,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.border,
   },
   timerArea: {
     flex: 1,
@@ -343,25 +345,27 @@ const styles = StyleSheet.create({
     lineHeight: 62,
   },
   distanceCard: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: Spacing.four,
   },
   distanceInput: {
-    borderRadius: Spacing.three,
+    borderRadius: Radius.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 18,
     color: colors.text,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
   },
   primaryButton: {
-    borderRadius: Spacing.four,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
     paddingVertical: Spacing.three,
     alignItems: 'center',
-    backgroundColor: colors.accent,
   },
   primaryButtonText: {
-    color: colors.background,
+    color: colors.text,
     fontSize: 17,
   },
   finishedHeader: {

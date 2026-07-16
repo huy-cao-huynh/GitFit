@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import Animated, { interpolateColor, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { ClipPath, Defs, Rect } from 'react-native-svg';
 
-import { Colors, Palette } from '@/constants/theme';
+import { Colors, Motion } from '@/constants/theme';
 
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
@@ -19,7 +19,7 @@ export function WaterBottle({ progress, size = 120 }: { progress: number; size?:
   const fill = useSharedValue(0);
 
   useEffect(() => {
-    fill.value = withTiming(clamped, { duration: 500 });
+    fill.value = withTiming(clamped, { duration: Motion.slow });
   }, [clamped, fill]);
 
   const animatedProps = useAnimatedProps(() => {
@@ -27,7 +27,7 @@ export function WaterBottle({ progress, size = 120 }: { progress: number; size?:
     return {
       height,
       y: BODY_TOP + BODY_HEIGHT - height,
-      fill: interpolateColor(fill.value, [0, 1], [Palette.orange, Colors.accent]),
+      fill: interpolateColor(fill.value, [0, 1], [Colors.primaryLight, Colors.primary]),
     };
   });
 
@@ -40,8 +40,8 @@ export function WaterBottle({ progress, size = 120 }: { progress: number; size?:
       </Defs>
 
       {/* cap + neck */}
-      <Rect x={VIEW_WIDTH / 2 - 8} y={0} width={16} height={10} rx={2} fill={Colors.backgroundSelected} />
-      <Rect x={VIEW_WIDTH / 2 - 12} y={10} width={24} height={20} rx={4} fill="none" stroke={Colors.backgroundSelected} strokeWidth={3} />
+      <Rect x={VIEW_WIDTH / 2 - 8} y={0} width={16} height={10} rx={2} fill={Colors.surfaceElevated} />
+      <Rect x={VIEW_WIDTH / 2 - 12} y={10} width={24} height={20} rx={4} fill="none" stroke={Colors.surfaceElevated} strokeWidth={3} />
 
       {/* body outline */}
       <Rect
@@ -51,12 +51,12 @@ export function WaterBottle({ progress, size = 120 }: { progress: number; size?:
         height={BODY_HEIGHT}
         rx={14}
         fill="none"
-        stroke={Colors.backgroundSelected}
+        stroke={Colors.surfaceElevated}
         strokeWidth={3}
       />
 
       {/* animated fill, clipped to the body */}
-      <AnimatedRect x={BODY_X} width={BODY_WIDTH} fill={Palette.orange} clipPath="url(#bottleBody)" animatedProps={animatedProps} />
+      <AnimatedRect x={BODY_X} width={BODY_WIDTH} fill={Colors.primary} clipPath="url(#bottleBody)" animatedProps={animatedProps} />
     </Svg>
   );
 }

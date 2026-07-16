@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Fonts, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { clampToStep, formatStepperValue } from '@/lib/stepper-math';
 
 const colors = Colors;
@@ -100,14 +100,14 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperValueButton: {
     minWidth: 44,
     paddingHorizontal: Spacing.one,
-    borderRadius: Spacing.one,
+    borderRadius: Radius.sm,
   },
   stepperValue: {
     minWidth: 44,
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   },
   stepperInput: {
     minWidth: 44,
-    borderRadius: Spacing.one,
+    borderRadius: Radius.sm,
     paddingHorizontal: Spacing.one,
     paddingVertical: 0,
     textAlign: 'center',
@@ -123,6 +123,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: colors.text,
-    backgroundColor: colors.backgroundSelected,
+    backgroundColor: colors.surfaceElevated,
   },
 });
