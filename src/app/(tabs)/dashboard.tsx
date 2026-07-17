@@ -1,12 +1,11 @@
 import { router } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { SymbolView } from 'expo-symbols';
 
 import { ActivityRings } from '@/components/activity-rings';
 import { Chevron } from '@/components/chevron';
-import { GradientFill } from '@/components/gradient-fill';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -187,8 +186,9 @@ export default function DashboardScreen() {
             </View>
           )}
 
-          <Pressable style={styles.startButton} onPress={() => router.push('/workout/choose')}>
-            <GradientFill />
+          <Pressable
+            style={({ pressed }) => [styles.startButton, pressed && styles.startButtonPressed]}
+            onPress={() => router.push('/workout/choose')}>
             <Svg width={14} height={16} viewBox="0 0 14 16">
               <Path d="M0 0l14 8-14 8z" fill={colors.text} />
             </Svg>
@@ -301,17 +301,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   startButton: {
-    borderRadius: Radius.lg,
+    borderRadius: Radius.md,
     overflow: 'hidden',
     paddingVertical: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.two,
+    backgroundColor: colors.primary,
+  },
+  startButtonPressed: {
+    backgroundColor: colors.primaryDark,
   },
   startButtonText: {
     color: colors.text,
-    fontSize: 22,
+    fontSize: 20,
     lineHeight: 28,
   },
   sectionLabel: {

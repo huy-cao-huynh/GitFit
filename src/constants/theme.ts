@@ -13,7 +13,7 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   text: '#F4F6FB',
-  textSecondary: '#A7B0C3',
+  textSecondary: '#737b8c',
   /** Inactive/decorative labels only (4.05:1 on background) — never body copy. */
   textMuted: '#6D7485',
   background: '#121212',

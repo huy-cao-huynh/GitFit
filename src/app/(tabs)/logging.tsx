@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
 import { router } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
+import { useState, type ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -10,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
 
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
@@ -213,12 +213,12 @@ export default function LoggingScreen() {
             <View style={styles.header}>
               <ThemedText type="subtitle">Goals & Logging</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
-                Track the metrics that do not live inside a workout.
+                Track your daily goals and progress.
               </ThemedText>
             </View>
 
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-              WORKOUT CALENDAR
+              CALENDAR
             </ThemedText>
             <ThemedView type="surface" style={styles.calendarCard}>
               <View style={styles.calendarRow}>

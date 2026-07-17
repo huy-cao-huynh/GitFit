@@ -1,6 +1,6 @@
+import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Radius, Spacing } from '@/constants/theme';
@@ -42,8 +42,8 @@ export function ScheduleDaySelector({
           <ThemedText type="smallBold">Schedule</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             {mode === 'single'
-              ? 'A one-off workout, not added to your recurring schedule.'
-              : 'Pick the days this workout should appear as a TODO.'}
+              ? 'A one-time workout.'
+              : 'Schedule this workout for weekly reminders.'}
           </ThemedText>
         </View>
       </View>
