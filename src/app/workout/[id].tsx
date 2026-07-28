@@ -83,7 +83,7 @@ function setTargetsFor(exercise: WorkoutExercise, isWarmup: boolean) {
 
 export default function ActiveWorkoutScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { routines, sessions, cardioSessions, goals, waterEntries, addSession, preferences } = useStore();
+  const { routines, sessions, cardioSessions, goals, goalEntries, waterEntries, addSession, preferences } = useStore();
   const unitSystem = preferences.unitSystem;
   const routine = routines.find((r) => r.id === id);
 
@@ -367,7 +367,7 @@ export default function ActiveWorkoutScreen() {
             strokeWidth={15}
             gap={6}
             rings={goals.map((goal, index) => ({
-              progress: currentGoalValue(goal, updatedSessions, cardioSessions, waterEntries) / goal.target,
+              progress: currentGoalValue(goal, updatedSessions, cardioSessions, waterEntries, goalEntries) / goal.target,
               color: RingColors[index % RingColors.length],
               trackColor: colors.border,
             }))}

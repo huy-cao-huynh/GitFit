@@ -10,8 +10,10 @@ import type {
   CheckoffLog,
   FoodLogEntry,
   GoalDef,
+  GoalEntry,
   Macros,
   MealType,
+  MeasurementEntry,
   ProgressPoint,
   Recipe,
   Routine,
@@ -243,9 +245,10 @@ export function currentGoalValue(
   sessions: Session[],
   cardioSessions: CardioSession[],
   waterEntries: WaterEntry[],
+  goalEntries: GoalEntry[] = [],
 ): number {
   const startKey = weekStartKey();
-  switch (goal.type) {
+  switch (goal.metric) {
     case 'workouts':
       return sessions.filter((s) => s.date >= startKey).length;
     case 'calories': {
@@ -261,8 +264,10 @@ export function currentGoalValue(
       return cardioSessions.filter((s) => s.date >= startKey).reduce((sum, s) => sum + s.minutes, 0);
     case 'water':
       return waterEntries.filter((e) => e.date >= startKey).reduce((sum, e) => sum + e.ounces, 0);
-    default:
-      return 0;
+    case 'manual':
+      return goalEntries
+        .filter((e) => e.goalId === goal.id && e.date >= startKey)
+        .reduce((sum, e) => sum + e.amount, 0);
   }
 }
 
@@ -297,6 +302,21 @@ export function strengthSeries(sessions: Session[], name: string): ProgressPoint
     points.push({ date: session.date, value: Math.max(...weights) });
   }
   return points.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Chartable trend for one measurement label: the latest value per date,
+ * oldest first (entries are stored newest-first).
+ */
+export function measurementSeries(entries: MeasurementEntry[], label: string): ProgressPoint[] {
+  const byDate = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.label !== label || byDate.has(entry.date)) continue;
+    byDate.set(entry.date, entry.value);
+  }
+  return [...byDate.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, value]) => ({ date, value }));
 }
 
 export function sessionsByDate(sessions: Session[]): Record<string, Session[]> {

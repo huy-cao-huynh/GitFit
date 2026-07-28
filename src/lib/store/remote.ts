@@ -17,8 +17,9 @@ import type {
   ExerciseKind,
   FoodLogEntry,
   GoalDef,
+  GoalEntry,
+  GoalMetric,
   Goals,
-  GoalType,
   MealType,
   MeasurementDef,
   MeasurementEntry,
@@ -118,10 +119,21 @@ interface CardioSessionRow {
 }
 
 interface GoalRow {
-  type: GoalType;
+  id?: string;
+  metric?: GoalMetric;
   label: string;
   target: number;
   unit: string;
+  position?: number;
+  /** Pre-0006 rows only: the enum word that was both the id and the metric. */
+  type?: string;
+}
+
+interface GoalEntryRow {
+  id: string;
+  goal_id: string;
+  date: string;
+  amount: number;
 }
 
 interface CheckoffDefRow {
@@ -283,13 +295,27 @@ function mapCardioSession(row: CardioSessionRow): CardioSession {
   };
 }
 
-/** Dashboard renders goal rings in this canonical order. */
-const GOAL_ORDER: GoalType[] = ['workouts', 'calories', 'cardio', 'water'];
+/** Ordering/metric fallback for rows from before migration 0006. */
+const LEGACY_GOAL_ORDER = ['workouts', 'calories', 'cardio', 'water'];
 
+function isGoalMetric(value: string | undefined): value is GoalMetric {
+  return value !== undefined && (LEGACY_GOAL_ORDER.includes(value) || value === 'manual');
+}
+
+/**
+ * Tolerates pre-0006 rows (no id/metric/position, an enum-word `type`) so a
+ * project that hasn't applied the migration still reads its goals; writes to
+ * the old shape fail with a warn, matching the fire-and-forget contract.
+ */
 function mapGoals(rows: GoalRow[]): Goals {
-  return [...rows]
-    .sort((a, b) => GOAL_ORDER.indexOf(a.type) - GOAL_ORDER.indexOf(b.type))
-    .map((row) => ({ id: row.type, type: row.type, label: row.label, target: row.target, unit: row.unit }));
+  const order = (row: GoalRow) => row.position ?? LEGACY_GOAL_ORDER.indexOf(row.type ?? '');
+  return [...rows].sort((a, b) => order(a) - order(b)).map((row) => ({
+    id: row.id ?? row.type ?? makeId(),
+    metric: row.metric ?? (isGoalMetric(row.type) ? row.type : 'manual'),
+    label: row.label,
+    target: row.target,
+    unit: row.unit,
+  }));
 }
 
 function mapCheckoffLog(rows: CheckoffLogRow[]): CheckoffLog {
@@ -381,9 +407,31 @@ async function fetchNutritionData(): Promise<
   }
 }
 
+/**
+ * goal_entries arrived in migration 0006; fetch it separately so a project
+ * that hasn't applied it yet degrades to no check-ins instead of failing
+ * hydration (the goals select itself tolerates the old shape via mapGoals).
+ */
+async function fetchGoalEntries(): Promise<GoalEntry[]> {
+  try {
+    const rows = unwrap(
+      await supabase
+        .from('goal_entries')
+        .select('id, goal_id, date, amount')
+        .order('date', { ascending: false })
+        .returns<GoalEntryRow[]>(),
+    );
+    return rows.map((row) => ({ id: row.id, goalId: row.goal_id, date: row.date, amount: row.amount }));
+  } catch (error) {
+    console.warn('Failed to fetch goal entries (migration 0006 applied?)', error);
+    return [];
+  }
+}
+
 /** Loads the user's entire store in parallel; throws on the first failure. */
 export async function fetchStoreData(): Promise<StoreData> {
   const nutritionPromise = fetchNutritionData();
+  const goalEntriesPromise = fetchGoalEntries();
   const [
     profile,
     routines,
@@ -439,6 +487,7 @@ export async function fetchStoreData(): Promise<StoreData> {
     sessions: unwrap(sessions).map(mapSession),
     cardioSessions: unwrap(cardioSessions).map(mapCardioSession),
     goals: mapGoals(unwrap(goals)),
+    goalEntries: await goalEntriesPromise,
     checkoffDefs: unwrap(checkoffDefs).map(({ id, name }) => ({ id, name })),
     checkoffLog: mapCheckoffLog(unwrap(checkoffLog)),
     bodyweight: unwrap(bodyweight),
@@ -588,18 +637,38 @@ export async function insertCardioSession(session: CardioSession): Promise<void>
   throwIfError(error);
 }
 
+/** PostgREST `in` list with each value quoted, so arbitrary ids can't break the filter. */
+function quotedIdList(ids: string[]): string {
+  return `(${ids.map((id) => `"${id.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`).join(',')})`;
+}
+
+function goalToRow(goal: GoalDef, position: number) {
+  return {
+    id: goal.id,
+    metric: goal.metric,
+    label: goal.label,
+    target: goal.target,
+    unit: goal.unit,
+    position,
+  };
+}
+
+/** Upsert + delete-missing; deleting a goal cascades its goal_entries rows. */
 export async function setGoals(goals: Goals): Promise<void> {
-  const keep = goals.map((goal) => goal.type);
   const remove = supabase.from('goals').delete();
-  const { error: deleteError } = keep.length
-    ? await remove.not('type', 'in', `(${keep.join(',')})`)
-    : await remove.in('type', GOAL_ORDER);
+  const { error: deleteError } = goals.length
+    ? await remove.not('id', 'in', quotedIdList(goals.map((goal) => goal.id)))
+    : await remove.gte('position', 0);
   throwIfError(deleteError);
   if (goals.length === 0) return;
-  const { error } = await supabase.from('goals').upsert(
-    goals.map((goal) => ({ type: goal.type, label: goal.label, target: goal.target, unit: goal.unit })),
-    { onConflict: 'user_id,type' },
-  );
+  const { error } = await supabase.from('goals').upsert(goals.map(goalToRow));
+  throwIfError(error);
+}
+
+export async function insertGoalEntry(entry: GoalEntry): Promise<void> {
+  const { error } = await supabase
+    .from('goal_entries')
+    .upsert({ id: entry.id, goal_id: entry.goalId, date: entry.date, amount: entry.amount });
   throwIfError(error);
 }
 
@@ -607,7 +676,7 @@ export async function setGoals(goals: Goals): Promise<void> {
 export async function setCheckoffDefs(defs: CheckoffDef[]): Promise<void> {
   const remove = supabase.from('checkoff_defs').delete();
   const { error: deleteError } = defs.length
-    ? await remove.not('id', 'in', `(${defs.map((def) => def.id).join(',')})`)
+    ? await remove.not('id', 'in', quotedIdList(defs.map((def) => def.id)))
     : await remove.gte('position', 0);
   throwIfError(deleteError);
   if (defs.length === 0) return;
@@ -650,7 +719,7 @@ export async function insertWaterEntry(entry: WaterEntry): Promise<void> {
 export async function setMeasurementDefs(defs: MeasurementDef[]): Promise<void> {
   const remove = supabase.from('measurement_defs').delete();
   const { error: deleteError } = defs.length
-    ? await remove.not('id', 'in', `(${defs.map((def) => def.id).join(',')})`)
+    ? await remove.not('id', 'in', quotedIdList(defs.map((def) => def.id)))
     : await remove.gte('position', 0);
   throwIfError(deleteError);
   if (defs.length === 0) return;
@@ -771,10 +840,7 @@ export async function updatePreferences(userId: string, preferences: Preferences
 }
 
 /** Written once on first login when the goals table is empty. */
-export async function seedDefaultGoals(goals: GoalDef[]): Promise<void> {
-  const { error } = await supabase.from('goals').upsert(
-    goals.map((goal) => ({ type: goal.type, label: goal.label, target: goal.target, unit: goal.unit })),
-    { onConflict: 'user_id,type' },
-  );
+export async function seedDefaultGoals(goals: Goals): Promise<void> {
+  const { error } = await supabase.from('goals').upsert(goals.map(goalToRow));
   throwIfError(error);
 }

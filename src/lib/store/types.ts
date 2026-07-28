@@ -85,18 +85,30 @@ export interface CardioSession {
   calories?: number;
 }
 
-export type GoalType = 'workouts' | 'calories' | 'cardio' | 'water';
+/**
+ * How a goal's weekly progress is computed. The four built-ins derive from
+ * logged data; 'manual' goals count the user's own check-ins (goal_entries).
+ */
+export type GoalMetric = 'workouts' | 'calories' | 'cardio' | 'water' | 'manual';
 
 /** A single modular weekly-goal slot; the Dashboard renders one ring per active goal. */
 export interface GoalDef {
-  id: string; // === type ('workouts' | 'calories' | 'cardio' | 'water')
-  type: GoalType;
+  id: string;
+  metric: GoalMetric;
   label: string;
   target: number;
   unit: string;
 }
 
 export type Goals = GoalDef[];
+
+/** One manual check-in against a 'manual'-metric goal. */
+export interface GoalEntry {
+  id: string;
+  goalId: string;
+  date: string;
+  amount: number;
+}
 
 /** A daily habit the user checks off (supplements, stretching, …). */
 export interface CheckoffDef {
@@ -194,6 +206,7 @@ export interface StoreData {
   sessions: Session[];
   cardioSessions: CardioSession[];
   goals: Goals;
+  goalEntries: GoalEntry[];
   checkoffDefs: CheckoffDef[];
   checkoffLog: CheckoffLog;
   bodyweight: BodyweightEntry[];

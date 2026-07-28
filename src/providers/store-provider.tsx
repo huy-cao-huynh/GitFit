@@ -9,12 +9,13 @@ import {
 } from 'react';
 
 import * as remote from '@/lib/store/remote';
-import { seedGoals, seedPreferences } from '@/lib/store/seed';
+import { makeSeedGoals, seedPreferences } from '@/lib/store/seed';
 import type {
   BodyweightEntry,
   CardioSession,
   CheckoffDef,
   FoodLogEntry,
+  GoalEntry,
   Goals,
   MeasurementDef,
   MeasurementEntry,
@@ -36,6 +37,7 @@ interface StoreValue extends StoreData {
   addSession: (session: Session) => void;
   addCardioSession: (session: CardioSession) => void;
   setGoals: (goals: Goals) => void;
+  addGoalEntry: (entry: GoalEntry) => void;
   setCheckoffDefs: (defs: CheckoffDef[]) => void;
   toggleCheckoff: (date: string, defId: string) => void;
   addBodyweight: (entry: BodyweightEntry) => void;
@@ -56,7 +58,8 @@ const EMPTY: StoreData = {
   routines: [],
   sessions: [],
   cardioSessions: [],
-  goals: seedGoals,
+  goals: makeSeedGoals(),
+  goalEntries: [],
   checkoffDefs: [],
   checkoffLog: {},
   bodyweight: [],
@@ -103,8 +106,8 @@ export function StoreProvider({ children }: PropsWithChildren) {
         const fetched = await remote.fetchStoreData();
         // First login: no goals yet, so write the defaults up-front.
         if (fetched.goals.length === 0) {
-          fetched.goals = seedGoals;
-          persist('default goals', remote.seedDefaultGoals(seedGoals));
+          fetched.goals = makeSeedGoals();
+          persist('default goals', remote.seedDefaultGoals(fetched.goals));
         }
         if (!cancelled) setLoaded({ userId, data: fetched });
       } catch (error) {
@@ -160,7 +163,13 @@ export function StoreProvider({ children }: PropsWithChildren) {
       },
       setGoals: (goals) => {
         apply('goals', () => goals);
+        const keptIds = new Set(goals.map((goal) => goal.id));
+        apply('goalEntries', (entries) => entries.filter((entry) => keptIds.has(entry.goalId)));
         persist('goals', remote.setGoals(goals));
+      },
+      addGoalEntry: (entry) => {
+        apply('goalEntries', (entries) => [entry, ...entries.filter((existing) => existing.id !== entry.id)]);
+        persist('goal entry', remote.insertGoalEntry(entry));
       },
       setCheckoffDefs: (defs) => {
         apply('checkoffDefs', () => defs);

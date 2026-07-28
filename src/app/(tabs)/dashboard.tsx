@@ -32,6 +32,7 @@ export default function DashboardScreen() {
     sessions,
     cardioSessions,
     goals,
+    goalEntries,
     checkoffDefs,
     checkoffLog,
     waterEntries,
@@ -47,7 +48,7 @@ export default function DashboardScreen() {
   const doneToday = checkoffLog[today] ?? [];
   const scheduledTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, today);
 
-  const waterGoal = goals.find((goal) => goal.type === 'water');
+  const waterGoal = goals.find((goal) => goal.metric === 'water');
   const todayWater = todayWaterOunces(waterEntries);
   const dailyWaterTarget = waterGoal ? Math.max(1, Math.round(waterGoal.target / 7)) : 0;
 
@@ -160,7 +161,7 @@ export default function DashboardScreen() {
                   strokeWidth={13}
                   gap={5}
                   rings={goals.map((goal, index) => ({
-                    progress: currentGoalValue(goal, sessions, cardioSessions, waterEntries) / goal.target,
+                    progress: currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries) / goal.target,
                     color: RingColors[index % RingColors.length],
                     trackColor: colors.border,
                   }))}
@@ -203,7 +204,7 @@ export default function DashboardScreen() {
                   key={goal.id}
                   color={RingColors[index % RingColors.length]}
                   goal={goal}
-                  value={currentGoalValue(goal, sessions, cardioSessions, waterEntries)}
+                  value={currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries)}
                   unitSystem={unitSystem}
                 />
               ))}
@@ -240,18 +241,10 @@ function LegendStat({
   value: number;
   unitSystem: 'imperial' | 'metric';
 }) {
-  const isVolume = goal.type === 'water';
+  const isVolume = goal.metric === 'water';
   const displayValue = isVolume ? toDisplayVolume(value, unitSystem) : Math.round(value);
   const displayTarget = isVolume ? toDisplayVolume(goal.target, unitSystem) : goal.target;
-  const unitLabel = isVolume
-    ? volumeUnitLabel(unitSystem)
-    : goal.type === 'calories'
-      ? 'cal'
-      : goal.type === 'cardio'
-        ? 'min cardio'
-        : goal.type === 'workouts'
-          ? 'workouts'
-          : goal.unit;
+  const unitLabel = isVolume ? volumeUnitLabel(unitSystem) : goal.unit || goal.label;
 
   return (
     <View style={styles.legendStat}>

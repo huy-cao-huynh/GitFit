@@ -1,6 +1,7 @@
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -12,34 +13,28 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { IconButton } from '@/components/icon-button';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import {
-  ageFromBirthday,
-  bmi,
-  bodyFatPercent,
   calendarWeekDays,
+  currentGoalValue,
   scheduledRoutineTasks,
   todayKey,
   todayWaterOunces,
   unscheduledCompletedWorkouts,
-  type Sex,
 } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import type { GoalType } from '@/lib/store/types';
+import type { GoalDef, GoalMetric } from '@/lib/store/types';
 import {
   formatVolume,
-  formatWeight,
   fromDisplayVolume,
-  fromDisplayWeight,
   toDisplayVolume,
   volumeUnitLabel,
-  weightUnitLabel,
 } from '@/lib/units';
-import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -49,23 +44,38 @@ function selectedDateFromKey(dateKey: string): Date {
   return new Date(year, month - 1, day);
 }
 
-interface BuiltinGoalMeta {
-  type: GoalType;
+/** Stepper behavior per metric; water values are in display units. */
+const METRIC_META: Record<GoalMetric, { min: number; max: number; step: number }> = {
+  workouts: { min: 1, max: 14, step: 1 },
+  calories: { min: 100, max: 5000, step: 50 },
+  cardio: { min: 0, max: 420, step: 5 },
+  water: { min: 0, max: 1000, step: 8 },
+  manual: { min: 1, max: 100, step: 1 },
+};
+
+const METRIC_ICONS = {
+  workouts: 'dumbbell.fill',
+  calories: 'flame.fill',
+  cardio: 'figure.run',
+  water: 'drop.fill',
+} as const;
+
+interface GoalPreset {
+  metric: Exclude<GoalMetric, 'manual'>;
   label: string;
-  min: number;
-  max: number;
-  step: number;
-  defaultTarget: number;
-  isVolume?: boolean;
+  target: number;
+  unit: string;
 }
 
-const BUILTIN_GOALS: BuiltinGoalMeta[] = [
-  { type: 'workouts', label: 'Workouts', min: 1, max: 14, step: 1, defaultTarget: 5 },
-  { type: 'calories', label: 'Calories', min: 100, max: 5000, step: 50, defaultTarget: 1500 },
-  { type: 'cardio', label: 'Cardio', min: 0, max: 420, step: 5, defaultTarget: 60 },
-  { type: 'water', label: 'Water', min: 0, max: 1000, step: 8, defaultTarget: 448, isVolume: true },
+/** The old built-in goals, offered as one-tap re-adds when missing. */
+const BUILTIN_GOAL_PRESETS: GoalPreset[] = [
+  { metric: 'workouts', label: 'Workouts', target: 5, unit: 'workouts' },
+  { metric: 'calories', label: 'Calories', target: 1500, unit: 'cal' },
+  { metric: 'cardio', label: 'Cardio', target: 60, unit: 'min' },
+  { metric: 'water', label: 'Water', target: 448, unit: 'oz' },
 ];
 
+const DEFAULT_CUSTOM_TARGET = 7;
 const WATER_QUICK_ADD_IMPERIAL = 16;
 const WATER_QUICK_ADD_METRIC = 500;
 
@@ -76,47 +86,33 @@ export default function LoggingScreen() {
     cardioSessions,
     goals,
     setGoals,
+    goalEntries,
+    addGoalEntry,
     checkoffDefs,
     setCheckoffDefs,
     checkoffLog,
     toggleCheckoff,
-    bodyweight,
     waterEntries,
     addWaterEntry,
-    measurementDefs,
-    setMeasurementDefs,
-    measurementEntries,
-    addBodyweight,
-    addMeasurementEntry,
     preferences,
   } = useStore();
-  const { session } = useAuth();
 
   const unitSystem = preferences.unitSystem;
   const today = todayKey();
   const doneToday = checkoffLog[today] ?? [];
-  const latestWeight = bodyweight[bodyweight.length - 1];
   const [selectedDate, setSelectedDate] = useState(today);
 
-  const metadata = session?.user.user_metadata ?? {};
-  const heightInches = Number(metadata.height_inches as string | undefined) || null;
-  const birthday = (metadata.birthday as string | undefined) || null;
-  const sex = ((metadata.sex as string | undefined) ?? 'unset') as Sex | 'unset';
-  const bmiValue = bmi(latestWeight?.weight ?? null, heightInches);
-  const age = ageFromBirthday(birthday);
-  const bodyFat = bodyFatPercent(bmiValue, age, sex === 'unset' ? null : sex);
-
-  const waterGoal = goals.find((goal) => goal.type === 'water');
+  const waterGoal = goals.find((goal) => goal.metric === 'water');
   const todayWater = todayWaterOunces(waterEntries);
 
   const [newCheckoff, setNewCheckoff] = useState('');
-  const [editingGoal, setEditingGoal] = useState<GoalType | null>(null);
+  const [newGoalLabel, setNewGoalLabel] = useState('');
+  const [newGoalUnit, setNewGoalUnit] = useState('');
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   const [editingGoalValue, setEditingGoalValue] = useState('');
+  const [renamingGoalId, setRenamingGoalId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [customWater, setCustomWater] = useState('');
-  const [weight, setWeight] = useState('');
-  const [newMeasurementLabel, setNewMeasurementLabel] = useState('');
-  const [newMeasurementUnit, setNewMeasurementUnit] = useState(unitSystem === 'metric' ? 'cm' : 'in');
-  const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
   const selectedDateObject = selectedDateFromKey(selectedDate);
   const selectedDateLabel = selectedDateObject.toLocaleDateString(undefined, {
     weekday: 'long',
@@ -126,6 +122,9 @@ export default function LoggingScreen() {
   const calendarDays = calendarWeekDays(routines, sessions, cardioSessions, selectedDateObject);
   const selectedTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, selectedDate);
   const extraCompletedWorkouts = unscheduledCompletedWorkouts(routines, sessions, cardioSessions, selectedDate);
+  const missingPresets = BUILTIN_GOAL_PRESETS.filter(
+    (preset) => !goals.some((goal) => goal.metric === preset.metric),
+  );
 
   const addCheckoff = () => {
     const name = newCheckoff.trim();
@@ -134,42 +133,60 @@ export default function LoggingScreen() {
     setNewCheckoff('');
   };
 
-  const saveWeight = () => {
-    const displayValue = Number(weight);
-    if (!Number.isFinite(displayValue) || displayValue <= 0) return;
-    addBodyweight({ date: today, weight: fromDisplayWeight(displayValue, unitSystem) });
-    setWeight('');
-  };
+  const displayTargetFor = (goal: GoalDef) =>
+    goal.metric === 'water' ? toDisplayVolume(goal.target, unitSystem) : goal.target;
 
-  const toggleBuiltinGoal = (meta: BuiltinGoalMeta) => {
-    const existing = goals.find((goal) => goal.type === meta.type);
-    if (existing) {
-      setGoals(goals.filter((goal) => goal.id !== existing.id));
-      return;
-    }
-    setGoals([
-      ...goals,
-      { id: meta.type, type: meta.type, label: meta.label, target: meta.defaultTarget, unit: meta.isVolume ? 'oz' : '' },
-    ]);
-  };
-
-  const setBuiltinTarget = (meta: BuiltinGoalMeta, displayValue: number) => {
+  const setGoalTarget = (goal: GoalDef, displayValue: number) => {
+    const meta = METRIC_META[goal.metric];
     const clamped = Math.min(meta.max, Math.max(meta.min, displayValue));
-    const target = meta.isVolume ? fromDisplayVolume(clamped, unitSystem) : clamped;
-    setGoals(goals.map((goal) => (goal.type === meta.type ? { ...goal, target } : goal)));
+    const target = goal.metric === 'water' ? fromDisplayVolume(clamped, unitSystem) : clamped;
+    setGoals(goals.map((existing) => (existing.id === goal.id ? { ...existing, target } : existing)));
   };
 
-  const startEditingGoal = (meta: BuiltinGoalMeta, displayTarget: number) => {
-    setEditingGoal(meta.type);
-    setEditingGoalValue(String(displayTarget));
+  const startEditingTarget = (goal: GoalDef) => {
+    setEditingGoalId(goal.id);
+    setEditingGoalValue(String(displayTargetFor(goal)));
   };
 
-  const commitEditingGoal = (meta: BuiltinGoalMeta) => {
+  const commitEditingTarget = (goal: GoalDef) => {
     const value = Number(editingGoalValue);
     if (Number.isFinite(value) && value > 0) {
-      setBuiltinTarget(meta, value);
+      setGoalTarget(goal, value);
     }
-    setEditingGoal(null);
+    setEditingGoalId(null);
+  };
+
+  const startRenaming = (goal: GoalDef) => {
+    setRenamingGoalId(goal.id);
+    setRenameValue(goal.label);
+  };
+
+  const commitRename = (goal: GoalDef) => {
+    const label = renameValue.trim();
+    if (label) {
+      setGoals(goals.map((existing) => (existing.id === goal.id ? { ...existing, label } : existing)));
+    }
+    setRenamingGoalId(null);
+  };
+
+  const addCustomGoal = () => {
+    const label = newGoalLabel.trim();
+    if (!label) return;
+    setGoals([
+      ...goals,
+      { id: makeId(), metric: 'manual', label, target: DEFAULT_CUSTOM_TARGET, unit: newGoalUnit.trim() },
+    ]);
+    setNewGoalLabel('');
+    setNewGoalUnit('');
+  };
+
+  const addPresetGoal = (preset: GoalPreset) => {
+    setGoals([...goals, { id: makeId(), ...preset }]);
+  };
+
+  const checkInGoal = (goal: GoalDef) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    addGoalEntry({ id: makeId(), goalId: goal.id, date: today, amount: 1 });
   };
 
   const addWater = (displayAmount: number) => {
@@ -185,26 +202,6 @@ export default function LoggingScreen() {
     addWater(sign * value);
     setCustomWater('');
   };
-
-  const addMeasurementSection = () => {
-    const label = newMeasurementLabel.trim();
-    const unit = newMeasurementUnit.trim();
-    if (!label || !unit) return;
-    if (measurementDefs.some((def) => def.label.toLowerCase() === label.toLowerCase())) return;
-    setMeasurementDefs([...measurementDefs, { id: makeId(), label, unit }]);
-    setNewMeasurementLabel('');
-  };
-
-  const saveMeasurement = (defId: string, label: string, unit: string) => {
-    const raw = measurementValues[defId];
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) return;
-    addMeasurementEntry({ id: makeId(), date: today, label, value, unit });
-    setMeasurementValues((current) => ({ ...current, [defId]: '' }));
-  };
-
-  const latestMeasurementFor = (label: string) =>
-    measurementEntries.find((entry) => entry.label === label);
 
   return (
     <TabFadeView style={styles.container}>
@@ -317,63 +314,130 @@ export default function LoggingScreen() {
               WEEKLY GOALS
             </ThemedText>
             <ThemedView type="surface" style={styles.card}>
-              {BUILTIN_GOALS.map((meta, index) => {
-                const goal = goals.find((g) => g.type === meta.type);
-                const displayTarget = goal ? (meta.isVolume ? toDisplayVolume(goal.target, unitSystem) : goal.target) : meta.defaultTarget;
-                const unitLabel = meta.isVolume ? volumeUnitLabel(unitSystem) : meta.type === 'calories' ? 'cal' : meta.type === 'cardio' ? 'min' : '/ week';
+              {goals.map((goal, index) => {
+                const displayTarget = displayTargetFor(goal);
+                const unitLabel =
+                  goal.metric === 'water' ? volumeUnitLabel(unitSystem) : goal.unit || '/ week';
+                const weekValue =
+                  goal.metric === 'manual'
+                    ? currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries)
+                    : null;
                 return (
-                  <View key={meta.type} style={[styles.goalRow, index > 0 && styles.rowDivider]}>
-                    <Pressable
-                      style={styles.goalToggle}
-                      onPress={() => toggleBuiltinGoal(meta)}
-                      hitSlop={6}>
-                      <View style={[styles.checkCircle, goal ? { backgroundColor: colors.primary } : styles.checkCircleOff]}>
-                        {goal && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
-                      </View>
-                      <ThemedText type="small">{meta.label}</ThemedText>
-                    </Pressable>
-                    {goal && (
-                      <View style={styles.goalControls}>
-                        <Pressable
-                          hitSlop={6}
-                          style={styles.stepperButton}
-                          onPress={() => setBuiltinTarget(meta, displayTarget - meta.step)}>
-                          <SymbolView name="minus" size={12} tintColor={colors.text} />
-                        </Pressable>
-                        {editingGoal === meta.type ? (
-                          <TextInput
-                            style={styles.goalValueInput}
-                            keyboardType="number-pad"
-                            value={editingGoalValue}
-                            onChangeText={setEditingGoalValue}
-                            onSubmitEditing={() => commitEditingGoal(meta)}
-                            onBlur={() => commitEditingGoal(meta)}
-                            autoFocus
-                            selectTextOnFocus
-                            returnKeyType="done"
-                          />
-                        ) : (
-                          <Pressable hitSlop={6} onPress={() => startEditingGoal(meta, displayTarget)}>
-                            <ThemedText type="smallBold" style={styles.goalValue}>
-                              {displayTarget}
-                              <ThemedText type="small" themeColor="textSecondary">
-                                {' '}
-                                {unitLabel}
-                              </ThemedText>
-                            </ThemedText>
-                          </Pressable>
-                        )}
-                        <Pressable
-                          hitSlop={6}
-                          style={styles.stepperButton}
-                          onPress={() => setBuiltinTarget(meta, displayTarget + meta.step)}>
-                          <SymbolView name="plus" size={12} tintColor={colors.text} />
-                        </Pressable>
+                  <View key={goal.id} style={[styles.goalRow, index > 0 && styles.rowDivider]}>
+                    {goal.metric === 'manual' ? (
+                      <Pressable style={styles.goalCheckin} hitSlop={6} onPress={() => checkInGoal(goal)}>
+                        <SymbolView name="plus" size={14} tintColor={colors.background} />
+                      </Pressable>
+                    ) : (
+                      <View style={styles.goalIcon}>
+                        <SymbolView name={METRIC_ICONS[goal.metric]} size={14} tintColor={colors.primaryLight} />
                       </View>
                     )}
+                    <View style={styles.goalLabelWrap}>
+                      {renamingGoalId === goal.id ? (
+                        <TextInput
+                          style={styles.goalLabelInput}
+                          value={renameValue}
+                          onChangeText={setRenameValue}
+                          onSubmitEditing={() => commitRename(goal)}
+                          onBlur={() => commitRename(goal)}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                        />
+                      ) : (
+                        <Pressable hitSlop={4} onPress={() => startRenaming(goal)}>
+                          <ThemedText type="small" numberOfLines={1}>
+                            {goal.label}
+                          </ThemedText>
+                        </Pressable>
+                      )}
+                      {weekValue !== null && (
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {weekValue} this week
+                        </ThemedText>
+                      )}
+                    </View>
+                    <View style={styles.goalControls}>
+                      <Pressable
+                        hitSlop={6}
+                        style={styles.stepperButton}
+                        onPress={() => setGoalTarget(goal, displayTarget - METRIC_META[goal.metric].step)}>
+                        <SymbolView name="minus" size={12} tintColor={colors.text} />
+                      </Pressable>
+                      {editingGoalId === goal.id ? (
+                        <TextInput
+                          style={styles.goalValueInput}
+                          keyboardType="number-pad"
+                          value={editingGoalValue}
+                          onChangeText={setEditingGoalValue}
+                          onSubmitEditing={() => commitEditingTarget(goal)}
+                          onBlur={() => commitEditingTarget(goal)}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                        />
+                      ) : (
+                        <Pressable hitSlop={6} onPress={() => startEditingTarget(goal)}>
+                          <ThemedText type="smallBold" style={styles.goalValue}>
+                            {displayTarget}
+                            <ThemedText type="small" themeColor="textSecondary">
+                              {' '}
+                              {unitLabel}
+                            </ThemedText>
+                          </ThemedText>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        hitSlop={6}
+                        style={styles.stepperButton}
+                        onPress={() => setGoalTarget(goal, displayTarget + METRIC_META[goal.metric].step)}>
+                        <SymbolView name="plus" size={12} tintColor={colors.text} />
+                      </Pressable>
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() => setGoals(goals.filter((existing) => existing.id !== goal.id))}>
+                        <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
+                      </Pressable>
+                    </View>
                   </View>
                 );
               })}
+
+              <View style={[styles.inputRow, goals.length > 0 && styles.rowDivider]}>
+                <TextInput
+                  style={[styles.textInput, styles.flex]}
+                  placeholder="Add a custom goal (e.g. Stretch)"
+                  placeholderTextColor={colors.textSecondary}
+                  value={newGoalLabel}
+                  onChangeText={setNewGoalLabel}
+                  onSubmitEditing={addCustomGoal}
+                  returnKeyType="done"
+                />
+                <TextInput
+                  style={[styles.textInput, styles.unitInput]}
+                  placeholder="Unit"
+                  placeholderTextColor={colors.textSecondary}
+                  value={newGoalUnit}
+                  onChangeText={setNewGoalUnit}
+                  onSubmitEditing={addCustomGoal}
+                  returnKeyType="done"
+                />
+                <IconButton icon="plus.circle.fill" active={!!newGoalLabel.trim()} onPress={addCustomGoal} />
+              </View>
+
+              {missingPresets.length > 0 && (
+                <View style={[styles.suggestionRow, styles.rowDivider]}>
+                  {missingPresets.map((preset) => (
+                    <Pressable key={preset.metric} style={styles.suggestionChip} onPress={() => addPresetGoal(preset)}>
+                      <SymbolView name="plus" size={10} tintColor={colors.primaryLight} />
+                      <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                        {preset.label}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
             </ThemedView>
 
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
@@ -407,7 +471,7 @@ export default function LoggingScreen() {
               })}
               <View style={[styles.inputRow, checkoffDefs.length > 0 && styles.rowDivider]}>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, styles.flex]}
                   placeholder="Add a daily goal"
                   placeholderTextColor={colors.textSecondary}
                   value={newCheckoff}
@@ -459,148 +523,11 @@ export default function LoggingScreen() {
                 </ThemedView>
               </>
             )}
-
-            <View style={styles.grid}>
-              <QuickLogCard
-                title="Body weight"
-                latest={latestWeight ? formatWeight(latestWeight.weight, unitSystem) : 'No logs'}
-                fields={
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder={`Weight (${weightUnitLabel(unitSystem)})`}
-                    placeholderTextColor={colors.textSecondary}
-                    value={weight}
-                    onChangeText={setWeight}
-                    keyboardType="decimal-pad"
-                  />
-                }
-                onSave={saveWeight}
-                canSave={!!weight.trim()}
-              />
-
-              <ThemedView type="surface" style={styles.logCard}>
-                <ThemedText type="smallBold">BMI &amp; Body Fat</ThemedText>
-                {bmiValue !== null ? (
-                  <>
-                    <ThemedText type="small">
-                      BMI <ThemedText type="smallBold">{bmiValue}</ThemedText>
-                    </ThemedText>
-                    <ThemedText type="small">
-                      Body fat{' '}
-                      <ThemedText type="smallBold">{bodyFat !== null ? `${bodyFat}%` : '—'}</ThemedText>
-                    </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {bodyFat !== null
-                        ? 'Rough estimate — accurate body-composition tracking is coming later.'
-                        : 'Add birthday & sex in Settings for a body-fat estimate.'}
-                    </ThemedText>
-                  </>
-                ) : (
-                  <ThemedText type="small" themeColor="textSecondary">
-                    Log your weight and add height in Settings to see BMI.
-                  </ThemedText>
-                )}
-              </ThemedView>
-            </View>
-
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-              MEASUREMENTS
-            </ThemedText>
-            <View style={styles.grid}>
-              {measurementDefs.map((def) => {
-                const latest = latestMeasurementFor(def.label);
-                return (
-                  <QuickLogCard
-                    key={def.id}
-                    title={def.label}
-                    latest={latest ? `${latest.value} ${latest.unit}` : 'No logs'}
-                    fields={
-                      <TextInput
-                        style={styles.textInput}
-                        placeholder={`Value (${def.unit})`}
-                        placeholderTextColor={colors.textSecondary}
-                        value={measurementValues[def.id] ?? ''}
-                        onChangeText={(text) => setMeasurementValues((current) => ({ ...current, [def.id]: text }))}
-                        keyboardType="decimal-pad"
-                      />
-                    }
-                    onSave={() => saveMeasurement(def.id, def.label, def.unit)}
-                    canSave={!!measurementValues[def.id]?.trim()}
-                    onRemove={() => setMeasurementDefs(measurementDefs.filter((d) => d.id !== def.id))}
-                  />
-                );
-              })}
-
-              <ThemedView type="surface" style={styles.logCard}>
-                <ThemedText type="smallBold">Add measurement section</ThemedText>
-                <View style={styles.splitRow}>
-                  <TextInput
-                    style={[styles.textInput, styles.flex]}
-                    placeholder="e.g. Chest"
-                    placeholderTextColor={colors.textSecondary}
-                    value={newMeasurementLabel}
-                    onChangeText={setNewMeasurementLabel}
-                  />
-                  <TextInput
-                    style={[styles.textInput, styles.unitInput]}
-                    placeholder="Unit"
-                    placeholderTextColor={colors.textSecondary}
-                    value={newMeasurementUnit}
-                    onChangeText={setNewMeasurementUnit}
-                  />
-                  <IconButton icon="plus.circle.fill" active={!!newMeasurementLabel.trim() && !!newMeasurementUnit.trim()} onPress={addMeasurementSection} />
-                </View>
-              </ThemedView>
-            </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
       </ScreenBackground>
     </TabFadeView>
-  );
-}
-
-function QuickLogCard({
-  title,
-  latest,
-  fields,
-  onSave,
-  canSave,
-  onRemove,
-}: {
-  title: string;
-  latest: string;
-  fields: ReactNode;
-  onSave: () => void;
-  canSave: boolean;
-  onRemove?: () => void;
-}) {
-  return (
-    <ThemedView type="surface" style={styles.logCard}>
-      <View style={styles.cardHeader}>
-        <View style={styles.flex}>
-          <ThemedText type="smallBold">{title}</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {latest}
-          </ThemedText>
-        </View>
-        {onRemove && (
-          <Pressable hitSlop={8} onPress={onRemove}>
-            <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
-          </Pressable>
-        )}
-        <IconButton icon="checkmark.circle.fill" active={canSave} onPress={onSave} />
-      </View>
-      {fields}
-    </ThemedView>
-  );
-}
-
-function IconButton({ icon, active, onPress }: { icon: 'plus.circle.fill' | 'checkmark.circle.fill'; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable hitSlop={8} onPress={onPress} disabled={!active}>
-      <SymbolView name={icon} size={24} tintColor={active ? colors.primaryLight : colors.textMuted} />
-    </Pressable>
   );
 }
 
@@ -725,14 +652,36 @@ const styles = StyleSheet.create({
   goalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: Spacing.three,
     gap: Spacing.two,
   },
-  goalToggle: {
-    flexDirection: 'row',
+  goalIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primaryTint,
     alignItems: 'center',
-    gap: Spacing.two,
+    justifyContent: 'center',
+  },
+  goalCheckin: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.volt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalLabelWrap: {
+    flex: 1,
+    gap: Spacing.half,
+  },
+  goalLabelInput: {
+    paddingVertical: 2,
+    paddingHorizontal: Spacing.two,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
+    color: colors.text,
+    fontSize: 14,
   },
   goalControls: {
     flexDirection: 'row',
@@ -740,11 +689,11 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   goalValue: {
-    minWidth: 88,
+    minWidth: 64,
     textAlign: 'center',
   },
   goalValueInput: {
-    minWidth: 88,
+    minWidth: 64,
     textAlign: 'center',
     paddingVertical: 2,
     paddingHorizontal: Spacing.two,
@@ -760,6 +709,23 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
+  },
+  suggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.two + Spacing.one,
+    borderRadius: Radius.full,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   rowDivider: {
     borderTopWidth: 1,
@@ -777,10 +743,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  checkCircleOff: {
-    borderWidth: 2,
-    borderColor: colors.border,
   },
   inputRow: {
     flexDirection: 'row',
@@ -812,22 +774,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
     marginTop: Spacing.two,
     marginBottom: Spacing.three,
-  },
-  grid: {
-    gap: Spacing.three,
-  },
-  logCard: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
   },
   splitRow: {
     flexDirection: 'row',

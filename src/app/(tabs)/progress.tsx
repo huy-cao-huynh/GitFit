@@ -1,19 +1,49 @@
 import { useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
 import { AnimatedNumber } from '@/components/animated-number';
 import { ContributionGrid } from '@/components/contribution-grid';
+import { IconButton } from '@/components/icon-button';
 import { LineChart } from '@/components/line-chart';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing, Type } from '@/constants/theme';
-import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
+import {
+  ageFromBirthday,
+  bmi,
+  bodyFatPercent,
+  exerciseNames,
+  measurementSeries,
+  strengthSeries,
+  toDateKey,
+  todayKey,
+  type Sex,
+} from '@/lib/store/derive';
+import { makeId } from '@/lib/store/id';
 import type { ProgressPoint } from '@/lib/store/types';
-import { toDisplayVolume, toDisplayWeight, volumeUnitLabel, weightUnitLabel } from '@/lib/units';
+import {
+  formatWeight,
+  fromDisplayWeight,
+  toDisplayVolume,
+  toDisplayWeight,
+  volumeUnitLabel,
+  weightUnitLabel,
+} from '@/lib/units';
+import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -22,11 +52,61 @@ type MetricRange = 'week' | 'month' | 'all';
 const METRIC_RANGE_LABELS: Record<MetricRange, string> = { week: 'Week', month: 'Month', all: 'All time' };
 
 export default function ProgressScreen() {
-  const { sessions, cardioSessions, bodyweight, steps, waterEntries, preferences } = useStore();
+  const {
+    sessions,
+    cardioSessions,
+    bodyweight,
+    addBodyweight,
+    steps,
+    waterEntries,
+    measurementDefs,
+    setMeasurementDefs,
+    measurementEntries,
+    addMeasurementEntry,
+    preferences,
+  } = useStore();
+  const { session } = useAuth();
   const unitSystem = preferences.unitSystem;
   const [metricRange, setMetricRange] = useState<MetricRange>('month');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
+  const [weight, setWeight] = useState('');
+  const [newMeasurementLabel, setNewMeasurementLabel] = useState('');
+  const [newMeasurementUnit, setNewMeasurementUnit] = useState(unitSystem === 'metric' ? 'cm' : 'in');
+  const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
+
+  const latestWeight = bodyweight[bodyweight.length - 1];
+  const metadata = session?.user.user_metadata ?? {};
+  const heightInches = Number(metadata.height_inches as string | undefined) || null;
+  const birthday = (metadata.birthday as string | undefined) || null;
+  const sex = ((metadata.sex as string | undefined) ?? 'unset') as Sex | 'unset';
+  const bmiValue = bmi(latestWeight?.weight ?? null, heightInches);
+  const age = ageFromBirthday(birthday);
+  const bodyFat = bodyFatPercent(bmiValue, age, sex === 'unset' ? null : sex);
+
+  const saveWeight = () => {
+    const displayValue = Number(weight);
+    if (!Number.isFinite(displayValue) || displayValue <= 0) return;
+    addBodyweight({ date: todayKey(), weight: fromDisplayWeight(displayValue, unitSystem) });
+    setWeight('');
+  };
+
+  const addMeasurementSection = () => {
+    const label = newMeasurementLabel.trim();
+    const unit = newMeasurementUnit.trim();
+    if (!label || !unit) return;
+    if (measurementDefs.some((def) => def.label.toLowerCase() === label.toLowerCase())) return;
+    setMeasurementDefs([...measurementDefs, { id: makeId(), label, unit }]);
+    setNewMeasurementLabel('');
+  };
+
+  const saveMeasurement = (defId: string, label: string, unit: string) => {
+    const raw = measurementValues[defId];
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return;
+    addMeasurementEntry({ id: makeId(), date: todayKey(), label, value, unit });
+    setMeasurementValues((current) => ({ ...current, [defId]: '' }));
+  };
 
   const names = exerciseNames(sessions);
   const exercise = selectedExercise ?? names[0];
@@ -61,6 +141,7 @@ export default function ProgressScreen() {
     <TabFadeView style={styles.container}>
       <ScreenBackground>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
@@ -130,7 +211,7 @@ export default function ProgressScreen() {
             </ThemedView>
           )}
 
-          {tileChartWidth > 0 && (
+          {tileChartWidth > 0 && (cardioPoints.length > 0 || waterPoints.length > 0) && (
             <View style={styles.tileGrid}>
               {cardioPoints.length > 0 && (
                 <StatTile
@@ -152,18 +233,129 @@ export default function ProgressScreen() {
                   chartWidth={tileChartWidth}
                 />
               )}
-              {bodyweightPoints.length > 0 && (
-                <StatTile
-                  label="Body weight"
-                  value={bodyweightPoints[bodyweightPoints.length - 1].value}
-                  unit={weightUnitLabel(unitSystem)}
-                  points={bodyweightPoints}
-                  color={ChartColors.bodyweight}
-                  chartWidth={tileChartWidth}
-                />
-              )}
             </View>
           )}
+
+          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            BODY
+          </ThemedText>
+
+          <ThemedView type="surface" style={styles.card}>
+            <StatHeader
+              label="Body weight"
+              latest={latestWeight ? formatWeight(latestWeight.weight, unitSystem) : 'No logs'}
+              caption={deltaCaption(bodyweightPoints, weightUnitLabel(unitSystem))}
+            />
+            <View style={styles.entryRow}>
+              <TextInput
+                style={[styles.entryInput, styles.flex]}
+                placeholder={`Log today's weight (${weightUnitLabel(unitSystem)})`}
+                placeholderTextColor={colors.textSecondary}
+                value={weight}
+                onChangeText={setWeight}
+                keyboardType="decimal-pad"
+              />
+              <IconButton icon="checkmark.circle.fill" active={!!weight.trim()} onPress={saveWeight} />
+            </View>
+            {chartWidth > 0 && bodyweightPoints.length > 1 && (
+              <LineChart points={bodyweightPoints} width={chartWidth} color={ChartColors.bodyweight} />
+            )}
+          </ThemedView>
+
+          <ThemedView type="surface" style={styles.card}>
+            <ThemedText type="smallBold">BMI &amp; Body Fat</ThemedText>
+            {bmiValue !== null ? (
+              <>
+                <ThemedText type="small">
+                  BMI <ThemedText type="smallBold">{bmiValue}</ThemedText>
+                </ThemedText>
+                <ThemedText type="small">
+                  Body fat{' '}
+                  <ThemedText type="smallBold">{bodyFat !== null ? `${bodyFat}%` : '—'}</ThemedText>
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {bodyFat !== null
+                    ? 'Rough estimate — accurate body-composition tracking is coming later.'
+                    : 'Add birthday & sex in Settings for a body-fat estimate.'}
+                </ThemedText>
+              </>
+            ) : (
+              <ThemedText type="small" themeColor="textSecondary">
+                Log your weight and add height in Settings to see BMI.
+              </ThemedText>
+            )}
+          </ThemedView>
+
+          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            MEASUREMENTS
+          </ThemedText>
+
+          {measurementDefs.map((def) => {
+            const latest = measurementEntries.find((entry) => entry.label === def.label);
+            const points = filterPoints(measurementSeries(measurementEntries, def.label), metricRange);
+            return (
+              <ThemedView key={def.id} type="surface" style={styles.card}>
+                <View style={styles.measurementHeader}>
+                  <View style={styles.flex}>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {def.label}
+                    </ThemedText>
+                    <ThemedText type="subtitle" style={styles.statValue}>
+                      {latest ? `${latest.value} ${latest.unit}` : 'No logs'}
+                    </ThemedText>
+                  </View>
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => setMeasurementDefs(measurementDefs.filter((existing) => existing.id !== def.id))}>
+                    <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
+                  </Pressable>
+                </View>
+                <View style={styles.entryRow}>
+                  <TextInput
+                    style={[styles.entryInput, styles.flex]}
+                    placeholder={`Log ${def.label.toLowerCase()} (${def.unit})`}
+                    placeholderTextColor={colors.textSecondary}
+                    value={measurementValues[def.id] ?? ''}
+                    onChangeText={(text) => setMeasurementValues((current) => ({ ...current, [def.id]: text }))}
+                    keyboardType="decimal-pad"
+                  />
+                  <IconButton
+                    icon="checkmark.circle.fill"
+                    active={!!measurementValues[def.id]?.trim()}
+                    onPress={() => saveMeasurement(def.id, def.label, def.unit)}
+                  />
+                </View>
+                {chartWidth > 0 && points.length > 1 && (
+                  <LineChart points={points} width={chartWidth} height={56} color={ChartColors.bodyweight} sparkline />
+                )}
+              </ThemedView>
+            );
+          })}
+
+          <ThemedView type="surface" style={styles.card}>
+            <ThemedText type="smallBold">Add measurement section</ThemedText>
+            <View style={styles.entryRow}>
+              <TextInput
+                style={[styles.entryInput, styles.flex]}
+                placeholder="e.g. Chest"
+                placeholderTextColor={colors.textSecondary}
+                value={newMeasurementLabel}
+                onChangeText={setNewMeasurementLabel}
+              />
+              <TextInput
+                style={[styles.entryInput, styles.unitInput]}
+                placeholder="Unit"
+                placeholderTextColor={colors.textSecondary}
+                value={newMeasurementUnit}
+                onChangeText={setNewMeasurementUnit}
+              />
+              <IconButton
+                icon="plus.circle.fill"
+                active={!!newMeasurementLabel.trim() && !!newMeasurementUnit.trim()}
+                onPress={addMeasurementSection}
+              />
+            </View>
+          </ThemedView>
 
           <View style={styles.strengthHeader}>
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
@@ -194,6 +386,7 @@ export default function ProgressScreen() {
             </ThemedText>
           )}
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
       </ScreenBackground>
     </TabFadeView>
@@ -362,6 +555,9 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
   },
+  flex: {
+    flex: 1,
+  },
   content: {
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
@@ -433,6 +629,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
+  },
+  measurementHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+  },
+  entryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  entryInput: {
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    color: colors.text,
+    backgroundColor: colors.surfaceElevated,
+    fontSize: 14,
+  },
+  unitInput: {
+    width: 72,
   },
   statValue: {
     fontSize: 26,
