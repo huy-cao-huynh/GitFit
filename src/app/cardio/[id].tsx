@@ -5,8 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActivityRings } from '@/components/activity-rings';
 import { GradientFill } from '@/components/gradient-fill';
+import { SummaryStat } from '@/components/summary-stat';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TimerText } from '@/components/timer-text';
 import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
 import { currentGoalValue, estimateCardioCalories, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
@@ -110,10 +112,11 @@ export default function CardioSessionScreen() {
           />
 
           <View style={styles.summaryRow}>
-            <SummaryStat value={`${session.minutes}`} unit="min" label="Duration" />
-            <SummaryStat value={`${session.calories ?? 0}`} unit="cal" label="Calories" />
+            <SummaryStat centered animatedValue={session.minutes} unit="min" label="Duration" />
+            <SummaryStat centered animatedValue={session.calories ?? 0} unit="cal" label="Calories" />
             {session.distanceMiles ? (
               <SummaryStat
+                centered
                 value={`${toDisplayDistance(session.distanceMiles, unitSystem)}`}
                 unit={distanceUnitLabel(unitSystem)}
                 label="Distance"
@@ -184,9 +187,7 @@ export default function CardioSessionScreen() {
             <ThemedText type="smallBold" themeColor="textSecondary">
               ELAPSED
             </ThemedText>
-            <ThemedText type="title" style={styles.timerValue}>
-              {formatDuration(elapsedSec)}
-            </ThemedText>
+            <TimerText seconds={elapsedSec} ticking />
             {routine.targetDistanceMiles ? (
               <ThemedText type="small" themeColor="textSecondary">
                 Target: {toDisplayDistance(routine.targetDistanceMiles, unitSystem)} {distanceUnitLabel(unitSystem)}
@@ -260,29 +261,6 @@ export default function CardioSessionScreen() {
   );
 }
 
-function SummaryStat({ value, unit, label }: { value: string; unit: string; label: string }) {
-  return (
-    <View style={styles.summaryStat}>
-      <ThemedText type="subtitle" style={styles.summaryValue}>
-        {value}
-        <ThemedText type="small" themeColor="textSecondary">
-          {' '}
-          {unit}
-        </ThemedText>
-      </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
-    </View>
-  );
-}
-
-function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -340,10 +318,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.two,
   },
-  timerValue: {
-    fontSize: 56,
-    lineHeight: 62,
-  },
   distanceCard: {
     borderRadius: Radius.lg,
     borderWidth: 1,
@@ -375,13 +349,5 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-  },
-  summaryStat: {
-    gap: Spacing.half,
-    alignItems: 'center',
-  },
-  summaryValue: {
-    fontSize: 26,
-    lineHeight: 30,
   },
 });

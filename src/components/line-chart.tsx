@@ -19,9 +19,12 @@ interface LineChartProps {
   color: string;
   showArea?: boolean;
   yFormatter?: (value: number) => string;
+  /** Compact mode: no gridlines, labels, or dots — just the line + area. */
+  sparkline?: boolean;
 }
 
 const PADDING = { top: 10, right: 10, bottom: 20, left: 40 };
+const SPARK_PADDING = { top: 4, right: 4, bottom: 4, left: 4 };
 const MAX_DOTS = 16;
 
 function niceStep(rough: number): number {
@@ -65,27 +68,57 @@ export function LineChart({
   color,
   showArea = true,
   yFormatter = defaultFormat,
+  sparkline = false,
 }: LineChartProps) {
-  if (points.length === 0 || width <= PADDING.left + PADDING.right) return null;
+  const padding = sparkline ? SPARK_PADDING : PADDING;
+  if (points.length === 0 || width <= padding.left + padding.right) return null;
 
   const values = points.map((p) => p.value);
   const ticks = buildTicks(Math.min(...values), Math.max(...values));
   const domainMin = ticks[0];
   const domainMax = ticks[ticks.length - 1];
 
-  const plotWidth = width - PADDING.left - PADDING.right;
-  const plotHeight = height - PADDING.top - PADDING.bottom;
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
   const x = (index: number) =>
-    PADDING.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
+    padding.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
   const y = (value: number) =>
-    PADDING.top + plotHeight - ((value - domainMin) / (domainMax - domainMin)) * plotHeight;
+    padding.top + plotHeight - ((value - domainMin) / (domainMax - domainMin)) * plotHeight;
 
   const coords = points.map((point, index) => ({ cx: x(index), cy: y(point.value) }));
   const polylinePoints = coords.map((c) => `${c.cx},${c.cy}`).join(' ');
-  const baselineY = PADDING.top + plotHeight;
-  const areaPoints = `${PADDING.left},${baselineY} ${polylinePoints} ${coords[coords.length - 1].cx},${baselineY}`;
+  const baselineY = padding.top + plotHeight;
+  const areaPoints = `${padding.left},${baselineY} ${polylinePoints} ${coords[coords.length - 1].cx},${baselineY}`;
   const gradientId = `area-${color.replace('#', '')}`;
   const dots = points.length <= MAX_DOTS ? coords : [coords[coords.length - 1]];
+
+  if (sparkline) {
+    return (
+      <Svg width={width} height={height}>
+        <Defs>
+          <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={color} stopOpacity={0.12} />
+            <Stop offset="1" stopColor={color} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        {showArea && <Polygon points={areaPoints} fill={`url(#${gradientId})`} />}
+        <Polyline
+          points={polylinePoints}
+          fill="none"
+          stroke={color}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        <Circle
+          cx={coords[coords.length - 1].cx}
+          cy={coords[coords.length - 1].cy}
+          r={3.5}
+          fill={color}
+        />
+      </Svg>
+    );
+  }
 
   return (
     <Svg width={width} height={height}>

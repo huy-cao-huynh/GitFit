@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -207,6 +208,7 @@ export default function LoggingScreen() {
 
   return (
     <TabFadeView style={styles.container}>
+      <ScreenBackground>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.scrollWrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView style={styles.scrollWrap} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -553,6 +555,7 @@ export default function LoggingScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      </ScreenBackground>
     </TabFadeView>
   );
 }

@@ -1,4 +1,9 @@
 import {
+  Fraunces_600SemiBold,
+  Fraunces_600SemiBold_Italic,
+  Fraunces_700Bold,
+} from '@expo-google-fonts/fraunces';
+import {
   Manrope_400Regular,
   Manrope_500Medium,
   Manrope_600SemiBold,
@@ -64,6 +69,11 @@ export default function RootLayout() {
     Manrope_500Medium,
     Manrope_600SemiBold,
     Manrope_700Bold,
+    Fraunces_600SemiBold,
+    Fraunces_600SemiBold_Italic,
+    Fraunces_700Bold,
+    'DSEG7Classic-Bold': require('../../assets/fonts/DSEG7Classic-Bold.ttf'),
+    'DSEG7Classic-Regular': require('../../assets/fonts/DSEG7Classic-Regular.ttf'),
   });
 
   if (!fontsLoaded) return null;

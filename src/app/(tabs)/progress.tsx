@@ -3,12 +3,14 @@ import { Modal, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimension
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
+import { AnimatedNumber } from '@/components/animated-number';
 import { ContributionGrid } from '@/components/contribution-grid';
 import { LineChart } from '@/components/line-chart';
+import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing, Type } from '@/constants/theme';
 import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
 import type { ProgressPoint } from '@/lib/store/types';
 import { toDisplayVolume, toDisplayWeight, volumeUnitLabel, weightUnitLabel } from '@/lib/units';
@@ -52,9 +54,12 @@ export default function ProgressScreen() {
   }));
 
   const chartWidth = contentWidth > 0 ? contentWidth - Spacing.three * 2 : 0;
+  // Half-width bento tile: (content − gap) / 2, minus the tile's own padding.
+  const tileChartWidth = contentWidth > 0 ? (contentWidth - Spacing.two) / 2 - Spacing.three * 2 : 0;
 
   return (
     <TabFadeView style={styles.container}>
+      <ScreenBackground>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView
           contentContainerStyle={styles.content}
@@ -69,10 +74,22 @@ export default function ProgressScreen() {
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
                 DAY TRACKING
               </ThemedText>
-              <ThemedView type="surface" style={styles.card}>
-                <StatHeader label="Workout activity" latest="Year to date" caption="daily sessions" />
-                <ContributionGrid sessions={sessions} cardioSessions={cardioSessions} width={chartWidth} />
-              </ThemedView>
+              <View style={[styles.card, styles.invertedCard]}>
+                <View style={styles.statHeader}>
+                  <View>
+                    <ThemedText type="small" style={styles.invertedTextDim}>
+                      Workout activity
+                    </ThemedText>
+                    <ThemedText type="subtitle" style={[styles.statValue, styles.invertedText]}>
+                      Year to date
+                    </ThemedText>
+                  </View>
+                  <ThemedText type="small" style={styles.invertedTextDim}>
+                    daily sessions
+                  </ThemedText>
+                </View>
+                <ContributionGrid sessions={sessions} cardioSessions={cardioSessions} width={chartWidth} inverted />
+              </View>
             </>
           )}
 
@@ -113,37 +130,39 @@ export default function ProgressScreen() {
             </ThemedView>
           )}
 
-          {cardioPoints.length > 0 && (
-            <ThemedView type="surface" style={styles.card}>
-              <StatHeader
-                label="Cardio"
-                latest={`${cardioPoints[cardioPoints.length - 1].value} min`}
-                caption={deltaCaption(cardioPoints, 'min')}
-              />
-              {chartWidth > 0 && <LineChart points={cardioPoints} width={chartWidth} color={ChartColors.cardio} />}
-            </ThemedView>
-          )}
-
-          {waterPoints.length > 0 && (
-            <ThemedView type="surface" style={styles.card}>
-              <StatHeader
-                label="Water"
-                latest={`${waterPoints[waterPoints.length - 1].value} ${volumeUnitLabel(unitSystem)}`}
-                caption={deltaCaption(waterPoints, volumeUnitLabel(unitSystem))}
-              />
-              {chartWidth > 0 && <LineChart points={waterPoints} width={chartWidth} color={ChartColors.water} />}
-            </ThemedView>
-          )}
-
-          {bodyweightPoints.length > 0 && (
-            <ThemedView type="surface" style={styles.card}>
-              <StatHeader
-                label="Body weight"
-                latest={`${bodyweightPoints[bodyweightPoints.length - 1].value} ${weightUnitLabel(unitSystem)}`}
-                caption={deltaCaption(bodyweightPoints, weightUnitLabel(unitSystem))}
-              />
-              {chartWidth > 0 && <LineChart points={bodyweightPoints} width={chartWidth} color={ChartColors.bodyweight} />}
-            </ThemedView>
+          {tileChartWidth > 0 && (
+            <View style={styles.tileGrid}>
+              {cardioPoints.length > 0 && (
+                <StatTile
+                  label="Cardio"
+                  value={cardioPoints[cardioPoints.length - 1].value}
+                  unit="min"
+                  points={cardioPoints}
+                  color={ChartColors.cardio}
+                  chartWidth={tileChartWidth}
+                />
+              )}
+              {waterPoints.length > 0 && (
+                <StatTile
+                  label="Water"
+                  value={waterPoints[waterPoints.length - 1].value}
+                  unit={volumeUnitLabel(unitSystem)}
+                  points={waterPoints}
+                  color={ChartColors.water}
+                  chartWidth={tileChartWidth}
+                />
+              )}
+              {bodyweightPoints.length > 0 && (
+                <StatTile
+                  label="Body weight"
+                  value={bodyweightPoints[bodyweightPoints.length - 1].value}
+                  unit={weightUnitLabel(unitSystem)}
+                  points={bodyweightPoints}
+                  color={ChartColors.bodyweight}
+                  chartWidth={tileChartWidth}
+                />
+              )}
+            </View>
           )}
 
           <View style={styles.strengthHeader}>
@@ -176,7 +195,39 @@ export default function ProgressScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
+      </ScreenBackground>
     </TabFadeView>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  unit,
+  points,
+  color,
+  chartWidth,
+}: {
+  label: string;
+  value: number;
+  unit: string;
+  points: ProgressPoint[];
+  color: string;
+  chartWidth: number;
+}) {
+  return (
+    <ThemedView type="surface" style={styles.tile}>
+      <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+        {label}
+      </ThemedText>
+      <View style={styles.tileValueRow}>
+        <AnimatedNumber value={value} style={styles.tileValue} />
+        <ThemedText type="small" themeColor="textSecondary">
+          {unit}
+        </ThemedText>
+      </View>
+      <LineChart points={points} width={chartWidth} height={56} color={color} sparkline />
+    </ThemedView>
   );
 }
 
@@ -343,6 +394,40 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: Spacing.three,
     gap: Spacing.two,
+  },
+  invertedCard: {
+    backgroundColor: colors.volt,
+    borderColor: 'transparent',
+  },
+  invertedText: {
+    color: colors.background,
+  },
+  invertedTextDim: {
+    color: 'rgba(8,8,13,0.65)',
+  },
+  tileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  tile: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: Spacing.three,
+    gap: Spacing.one,
+  },
+  tileValueRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: Spacing.one,
+  },
+  tileValue: {
+    ...Type.numeric,
+    fontSize: 22,
+    lineHeight: 28,
   },
   statHeader: {
     flexDirection: 'row',
