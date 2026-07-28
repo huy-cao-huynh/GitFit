@@ -14,7 +14,7 @@ Roadmap (in priority order):
 5. ✅ Supabase tables + RLS replacing the local AsyncStorage store — done (`supabase/migrations/`, `src/lib/store/remote.ts`)
 6. ✅ Design overhaul "Electric. Editorial. Alive.": GitFit brand mark + app icons, near-black electric palette, Fraunces/DSEG7 type mix, bento layouts, floating pill tab bar, haptics — done
 7. ✅ Nutrition tab: meal/calorie/macro logging via Open Food Facts, recipe book, daily nutrition goals (6th tab; requires migration 0005) — done
-8. Workout-session upgrade: previous-set/PR hints, per-exercise skip, richer end-early flows
+8. ✅ Workout-session upgrade: previous-set/PR hints, per-exercise skip, save-or-discard end flow, smooth countdown ring + haptic choreography, muscle-group chips — done
 9. Customizable goals + body metrics move from Log to Progress
 10. Apple Health / calorie sync (settings toggle is a disabled placeholder; the steps series stays empty until then)
 
@@ -24,7 +24,7 @@ Roadmap (in priority order):
 - Root `_layout.tsx`: `GestureHandlerRootView` → dark nav theme → `AuthProvider` → `StoreProvider` → `Stack` with `Stack.Protected` guards keyed on the Supabase session — never add manual login redirects; flipping the guard handles navigation. `RootNavigator` also gates on `useStore().isHydrated`.
 - `(tabs)/_layout.tsx`: JS `Tabs` from `expo-router/js-tabs` with a custom `tabBar` — `TabBar` (`src/components/tab-bar.tsx`), a floating pill bar (inset from the screen edges, `Radius.full`, opaque `surface` + 1px border) with SF-symbol icons and a reanimated `surfaceElevated` pill that slides behind the active tab; tab presses fire `Haptics.selectionAsync()`. 5 tabs: dashboard, logging (titled "Log"), progress, workouts, settings. Scrollable tab content pads with `BottomTabInset` to clear the floating bar.
 - `workout/choose.tsx`: modal picker for which routine to start, pushed from the dashboard's Start Workout button.
-- `workout/[id].tsx`: active-session screen, full-screen push. State machine: idle (overview + Start Workout) → per set: Start Set → sliders (reps/weight) → Complete Set → rest countdown → next. Saves a `Session` to the store on finish. Timers recompute from wall-clock timestamps, never tick counts.
+- `workout/[id].tsx`: active-session screen, full-screen push. State machine: exerciseReady (reorderable queue + inline exercise editor) → per set: setPending → setActive → resting → next; finished shows rings + animated summary. Saves a `Session` to the store on finish. Timers recompute from wall-clock timestamps, never tick counts; the work/rest countdown is `src/components/countdown-timer.tsx` (wall-clock completion + one linear reanimated ring sweep + haptic choreography: 10 s warning, 3-2-1 ticks, success at zero). The setPending target card shows the matching set from the last session (`lastExercisePerformance`), the all-time best (`exercisePR`), and a volt PR-ATTEMPT badge when the target tops it; exercise headers show muscle-group chips from `src/lib/muscles.ts` (keyword mapping, cosmetic only). Mid-workout escape hatches: Skip Set, Skip this exercise (remaining sets logged as skipped), and End → save-&-finish / discard.
 - `history/[id].tsx`: per-session detail (sets × reps × weight + duration/calories).
 - `routine/[id].tsx` (modal): create (`id === 'new'`) / edit / delete routines.
 - `(tabs)/logging.tsx` ("Log"): weekly goal targets, daily check-off definitions, calendar week strip, water/body-weight/measurement quick-logging; linked from the dashboard Today section (there is no separate `goals.tsx` modal).

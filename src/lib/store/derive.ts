@@ -16,6 +16,7 @@ import type {
   Recipe,
   Routine,
   Session,
+  SetLog,
   WaterEntry,
   Weekday,
 } from './types';
@@ -357,6 +358,50 @@ export function bodyFatPercent(bmiValue: number | null, ageYears: number | null,
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+// ---------------------------------------------------------------------------
+// Exercise history
+// ---------------------------------------------------------------------------
+
+/**
+ * The most recent logged working sets for an exercise (matched by name,
+ * case-insensitive). Sessions are stored newest-first, so the first hit wins.
+ */
+export function lastExercisePerformance(
+  sessions: Session[],
+  exerciseName: string,
+): { date: string; sets: SetLog[] } | null {
+  const target = exerciseName.trim().toLowerCase();
+  for (const session of sessions) {
+    for (const exercise of session.exercises) {
+      if (exercise.name.trim().toLowerCase() !== target) continue;
+      const sets = exercise.sets.filter((set) => !set.isWarmup && !set.skipped);
+      if (sets.length > 0) return { date: session.date, sets };
+    }
+  }
+  return null;
+}
+
+/** Best-ever working-set weight for an exercise, with the reps it was hit for. */
+export function exercisePR(
+  sessions: Session[],
+  exerciseName: string,
+): { weight: number; reps?: number; date: string } | null {
+  const target = exerciseName.trim().toLowerCase();
+  let best: { weight: number; reps?: number; date: string } | null = null;
+  for (const session of sessions) {
+    for (const exercise of session.exercises) {
+      if (exercise.name.trim().toLowerCase() !== target) continue;
+      for (const set of exercise.sets) {
+        if (set.isWarmup || set.skipped || !set.weight) continue;
+        if (!best || set.weight > best.weight) {
+          best = { weight: set.weight, reps: set.reps, date: session.date };
+        }
+      }
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------

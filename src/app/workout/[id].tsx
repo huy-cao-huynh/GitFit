@@ -1,12 +1,12 @@
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
-import Svg, { Circle } from 'react-native-svg';
 
 import { ActivityRings } from '@/components/activity-rings';
+import { CountdownTimer } from '@/components/countdown-timer';
 import { GradientFill } from '@/components/gradient-fill';
 import { SortableList } from '@/components/sortable-list';
 import { Stepper } from '@/components/stepper';
@@ -16,7 +16,8 @@ import { TimerText } from '@/components/timer-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
-import { currentGoalValue, todayKey } from '@/lib/store/derive';
+import { muscleGroupsFor } from '@/lib/muscles';
+import { currentGoalValue, exercisePR, lastExercisePerformance, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, RoutineExercise, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
 import { clampToStep, formatStepperValue } from '@/lib/stepper-math';
@@ -136,6 +137,16 @@ export default function ActiveWorkoutScreen() {
   const isLastExercise = exerciseIndex + 1 >= order.length;
   const workoutCalories = Math.max(1, Math.round(elapsedSec / 60)) * 8;
 
+  const lastPerformance = lastExercisePerformance(sessions, exercise.name);
+  const personalRecord = exercisePR(sessions, exercise.name);
+  const muscleGroups = muscleGroupsFor(exercise.name);
+  // Working-set number (0-based, warm-ups excluded) for matching against the
+  // corresponding set of the previous session.
+  const workingSetNumber = Math.max(0, setIndex - warmupSetCount);
+  const lastMatchingSet = lastPerformance
+    ? lastPerformance.sets[Math.min(workingSetNumber, lastPerformance.sets.length - 1)]
+    : null;
+
   const startExercise = () => {
     setStartedAt((value) => value ?? Date.now());
     const targets = setTargetsFor(exercise, (exercise.warmupSets ?? 0) > 0);
@@ -185,6 +196,21 @@ export default function ActiveWorkoutScreen() {
     );
   };
 
+  const advanceToNextExercise = (currentLogged: SessionExercise[]) => {
+    const upcoming = order[exerciseIndex + 1];
+    if (!upcoming) {
+      finishWorkout(currentLogged);
+      return;
+    }
+    setExerciseIndex((index) => index + 1);
+    setSetIndex(0);
+    const upcomingTargets = setTargetsFor(upcoming, (upcoming.warmupSets ?? 0) > 0);
+    setReps(upcomingTargets.reps);
+    setWeight(upcomingTargets.weight);
+    setDurationSec(upcomingTargets.durationSec);
+    setPhase('exerciseReady');
+  };
+
   const advanceAfterRest = () => {
     if (!isLastSet) {
       const nextSetIndex = setIndex + 1;
@@ -196,17 +222,30 @@ export default function ActiveWorkoutScreen() {
       setPhase('setPending');
       return;
     }
+    advanceToNextExercise(logged);
+  };
 
-    const upcoming = order[exerciseIndex + 1];
-    if (upcoming) {
-      setExerciseIndex((index) => index + 1);
-      setSetIndex(0);
-      const upcomingTargets = setTargetsFor(upcoming, (upcoming.warmupSets ?? 0) > 0);
-      setReps(upcomingTargets.reps);
-      setWeight(upcomingTargets.weight);
-      setDurationSec(upcomingTargets.durationSec);
-      setPhase('exerciseReady');
-    }
+  /** Marks every remaining set of the current exercise as skipped and moves on. */
+  const skipExercise = () => {
+    const remainingSets: SetLog[] = Array.from({ length: plannedSetCount - setIndex }, (_, offset) => {
+      const skippedIndex = setIndex + offset;
+      return { kind: exerciseKind, skipped: true, isWarmup: skippedIndex < warmupSetCount || undefined };
+    });
+    const existing = logged.find((item) => item.exerciseId === exercise.id);
+    const next = existing
+      ? logged.map((item) =>
+          item.exerciseId === exercise.id ? { ...item, sets: [...item.sets, ...remainingSets] } : item,
+        )
+      : [...logged, { exerciseId: exercise.id, name: exercise.name, sets: remainingSets }];
+    setLogged(next);
+    advanceToNextExercise(next);
+  };
+
+  const confirmSkipExercise = () => {
+    Alert.alert(`Skip ${exercise.name}?`, 'Its remaining sets will be marked as skipped.', [
+      { text: 'Keep going', style: 'cancel' },
+      { text: 'Skip exercise', style: 'destructive', onPress: skipExercise },
+    ]);
   };
 
   const buildSession = (finalLogged: SessionExercise[]): Session => {
@@ -230,19 +269,18 @@ export default function ActiveWorkoutScreen() {
   };
 
   const confirmEnd = () => {
-    Alert.alert('End workout early?', 'Your completed sets will be saved and skipped sets will be ignored.', [
+    const hasWork = logged.some((item) => item.sets.some((set) => !set.skipped));
+    if (!hasWork) {
+      Alert.alert('End workout?', 'Nothing has been logged yet, so the session will be discarded.', [
+        { text: 'Keep going', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => router.dismissTo('/dashboard') },
+      ]);
+      return;
+    }
+    Alert.alert('End workout early?', 'Save what you’ve done, or discard the whole session.', [
       { text: 'Keep going', style: 'cancel' },
-      {
-        text: 'End workout',
-        style: 'destructive',
-        onPress: () => {
-          if (logged.some((item) => item.sets.some((set) => !set.skipped))) {
-            finishWorkout(logged);
-          } else {
-            router.dismissTo('/dashboard');
-          }
-        },
-      },
+      { text: 'Save & finish', onPress: () => finishWorkout(logged) },
+      { text: 'Discard workout', style: 'destructive', onPress: () => router.dismissTo('/dashboard') },
     ]);
   };
 
@@ -385,6 +423,7 @@ export default function ActiveWorkoutScreen() {
               NEXT EXERCISE
             </ThemedText>
             <ThemedText type="subtitle">{exercise.name}</ThemedText>
+            <MuscleChips groups={muscleGroups} />
           </View>
 
           <ScrollView style={styles.flex} contentContainerStyle={styles.checklist}>
@@ -464,6 +503,7 @@ export default function ActiveWorkoutScreen() {
             {formatCurrentSetLabel(setIndex, warmupSetCount, exercise.sets).toUpperCase()}
           </ThemedText>
           <ThemedText type="subtitle">{exercise.name}</ThemedText>
+          <MuscleChips groups={muscleGroups} />
         </View>
 
         <View style={styles.flex}>
@@ -474,6 +514,8 @@ export default function ActiveWorkoutScreen() {
               isWarmup={isWarmupSet}
               targets={activeSetTargets}
               unitSystem={unitSystem}
+              lastSet={lastMatchingSet}
+              personalRecord={personalRecord}
             />
           )}
 
@@ -525,19 +567,26 @@ export default function ActiveWorkoutScreen() {
         </View>
 
         {phase === 'setPending' && (
-          <View style={styles.actionRow}>
-            <Pressable style={styles.secondaryButton} onPress={skipSet}>
-              <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-                Skip Set
+          <>
+            <View style={styles.actionRow}>
+              <Pressable style={styles.secondaryButton} onPress={skipSet}>
+                <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
+                  Skip Set
+                </ThemedText>
+              </Pressable>
+              <Pressable style={[styles.primaryButton, styles.flex]} onPress={() => setPhase('setActive')}>
+                <GradientFill />
+                <ThemedText type="smallBold" style={styles.primaryButtonText}>
+                  Start Set
+                </ThemedText>
+              </Pressable>
+            </View>
+            <Pressable style={styles.skipExerciseRow} onPress={confirmSkipExercise}>
+              <ThemedText type="small" themeColor="textSecondary">
+                Skip this exercise
               </ThemedText>
             </Pressable>
-            <Pressable style={[styles.primaryButton, styles.flex]} onPress={() => setPhase('setActive')}>
-              <GradientFill />
-              <ThemedText type="smallBold" style={styles.primaryButtonText}>
-                Start Set
-              </ThemedText>
-            </Pressable>
-          </View>
+          </>
         )}
 
         {phase === 'setActive' && exerciseKind === 'reps' && (
@@ -570,21 +619,50 @@ export default function ActiveWorkoutScreen() {
   );
 }
 
+function MuscleChips({ groups }: { groups: string[] }) {
+  if (groups.length === 0) return null;
+  return (
+    <View style={styles.muscleChips}>
+      {groups.map((group) => (
+        <View key={group} style={styles.muscleChip}>
+          <ThemedText type="small" style={{ color: colors.primaryLight }}>
+            {group}
+          </ThemedText>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function TargetCard({
   exercise,
   kind,
   isWarmup,
   targets,
   unitSystem,
+  lastSet,
+  personalRecord,
 }: {
   exercise: WorkoutExercise;
   kind: 'reps' | 'time';
   isWarmup: boolean;
   targets: ReturnType<typeof setTargetsFor>;
   unitSystem: UnitSystem;
+  lastSet: SetLog | null;
+  personalRecord: { weight: number; reps?: number; date: string } | null;
 }) {
+  const isPRAttempt =
+    !isWarmup && kind === 'reps' && personalRecord !== null && targets.weight > personalRecord.weight;
+
   return (
     <ThemedView type="surface" style={styles.targetCard}>
+      {isPRAttempt ? (
+        <View style={styles.prBadge}>
+          <ThemedText type="smallBold" style={styles.prBadgeText}>
+            PR ATTEMPT
+          </ThemedText>
+        </View>
+      ) : null}
       {isWarmup ? (
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.lastTime}>
           WARM-UP
@@ -624,9 +702,22 @@ function TargetCard({
           </View>
         </View>
       )}
-      {exercise.lastTime && (
+      {lastSet ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
+          Last session, this set: {formatSetLog(lastSet, unitSystem)}
+        </ThemedText>
+      ) : exercise.lastTime ? (
         <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
           Last time: {formatSetLog(exercise.lastTime, unitSystem)}
+        </ThemedText>
+      ) : null}
+      {personalRecord && (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
+          Best ever:{' '}
+          <ThemedText type="smallBold" style={{ color: colors.volt }}>
+            {toDisplayWeight(personalRecord.weight, unitSystem)} {weightUnitLabel(unitSystem)}
+            {personalRecord.reps ? ` × ${personalRecord.reps}` : ''}
+          </ThemedText>
         </ThemedText>
       )}
       <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
@@ -833,84 +924,6 @@ function ExerciseStatusRow({
   );
 }
 
-function CountdownTimer({
-  seconds,
-  label,
-  nextLabel,
-  onDone,
-  skippable,
-}: {
-  seconds: number;
-  label: string;
-  nextLabel?: string;
-  onDone: () => void;
-  skippable?: boolean;
-}) {
-  const endsAt = useRef<number | null>(null);
-  const called = useRef(false);
-  const [remaining, setRemaining] = useState(seconds);
-
-  useEffect(() => {
-    endsAt.current ??= Date.now() + seconds * 1000;
-    const interval = setInterval(() => {
-      const left = Math.max(0, Math.ceil(((endsAt.current ?? 0) - Date.now()) / 1000));
-      setRemaining(left);
-      if (left === 0 && !called.current) {
-        called.current = true;
-        clearInterval(interval);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onDone();
-      }
-    }, 250);
-    return () => clearInterval(interval);
-  }, [onDone, seconds]);
-
-  const size = 160;
-  const strokeWidth = 8;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const progress = seconds > 0 ? remaining / seconds : 0;
-
-  return (
-    <View style={styles.timerArea}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        {label}
-      </ThemedText>
-      <View style={{ width: size, height: size }}>
-        <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
-          <Circle cx={size / 2} cy={size / 2} r={radius} stroke={colors.border} strokeWidth={strokeWidth} fill="none" />
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={colors.primary}
-            strokeWidth={strokeWidth}
-            fill="none"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={circumference * (1 - progress)}
-          />
-        </Svg>
-        <View style={styles.timerLabel}>
-          <TimerText seconds={remaining} size="sm" ticking />
-        </View>
-      </View>
-      {nextLabel ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          Up next: {nextLabel}
-        </ThemedText>
-      ) : null}
-      {skippable ? (
-        <Pressable style={styles.skipButton} onPress={onDone}>
-          <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-            Skip Rest
-          </ThemedText>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
 function ModeToggle({ kind, onChange }: { kind: ExerciseKind; onChange: (kind: ExerciseKind) => void }) {
   return (
     <View style={styles.modeToggle}>
@@ -1076,6 +1089,18 @@ const styles = StyleSheet.create({
   exerciseHeader: {
     gap: Spacing.half,
   },
+  muscleChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
+    marginTop: Spacing.one,
+  },
+  muscleChip: {
+    paddingVertical: Spacing.half,
+    paddingHorizontal: Spacing.two,
+    borderRadius: Radius.full,
+    backgroundColor: colors.primaryTint,
+  },
   checklist: {
     gap: Spacing.two,
     paddingVertical: Spacing.two,
@@ -1162,6 +1187,17 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     marginBottom: Spacing.three,
   },
+  prBadge: {
+    alignSelf: 'center',
+    paddingVertical: Spacing.half,
+    paddingHorizontal: Spacing.two + Spacing.one,
+    borderRadius: Radius.full,
+    backgroundColor: colors.volt,
+  },
+  prBadgeText: {
+    color: colors.background,
+    letterSpacing: 0.6,
+  },
   targetRow: {
     flexDirection: 'row',
     gap: Spacing.four,
@@ -1235,27 +1271,13 @@ const styles = StyleSheet.create({
     color: colors.primaryLight,
     backgroundColor: colors.surfaceElevated,
   },
-  timerArea: {
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingVertical: Spacing.three,
-  },
-  timerLabel: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  skipButton: {
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.four,
-  },
   actionRow: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  skipExerciseRow: {
+    alignItems: 'center',
+    paddingVertical: Spacing.two,
   },
   secondaryButton: {
     borderRadius: Radius.md,
