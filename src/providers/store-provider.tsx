@@ -14,10 +14,13 @@ import type {
   BodyweightEntry,
   CardioSession,
   CheckoffDef,
+  FoodLogEntry,
   Goals,
   MeasurementDef,
   MeasurementEntry,
+  NutritionGoals,
   Preferences,
+  Recipe,
   Routine,
   Session,
   StoreData,
@@ -39,6 +42,13 @@ interface StoreValue extends StoreData {
   addWaterEntry: (entry: WaterEntry) => void;
   setMeasurementDefs: (defs: MeasurementDef[]) => void;
   addMeasurementEntry: (entry: MeasurementEntry) => void;
+  addFoodLog: (entry: FoodLogEntry) => void;
+  updateFoodLog: (entry: FoodLogEntry) => void;
+  deleteFoodLog: (id: string) => void;
+  addRecipe: (recipe: Recipe) => void;
+  updateRecipe: (recipe: Recipe) => void;
+  deleteRecipe: (id: string) => void;
+  setNutritionGoals: (goals: NutritionGoals) => void;
   setPreferences: (preferences: Preferences) => void;
 }
 
@@ -54,6 +64,9 @@ const EMPTY: StoreData = {
   waterEntries: [],
   measurementDefs: [],
   measurementEntries: [],
+  foodLogs: [],
+  recipes: [],
+  nutritionGoals: null,
   preferences: seedPreferences,
 };
 
@@ -189,6 +202,35 @@ export function StoreProvider({ children }: PropsWithChildren) {
           ),
         );
         persist('measurement entry', remote.insertMeasurementEntry(entry));
+      },
+      addFoodLog: (entry) => {
+        apply('foodLogs', (entries) => [entry, ...entries]);
+        persist('food log', remote.insertFoodLog(entry));
+      },
+      updateFoodLog: (entry) => {
+        apply('foodLogs', (entries) => entries.map((e) => (e.id === entry.id ? entry : e)));
+        persist('food log', remote.updateFoodLog(entry));
+      },
+      deleteFoodLog: (id) => {
+        apply('foodLogs', (entries) => entries.filter((e) => e.id !== id));
+        persist('food log delete', remote.deleteFoodLog(id));
+      },
+      addRecipe: (recipe) => {
+        const position = data?.recipes.length ?? 0;
+        apply('recipes', (recipes) => [...recipes, recipe]);
+        persist('recipe', remote.insertRecipe(recipe, position));
+      },
+      updateRecipe: (recipe) => {
+        apply('recipes', (recipes) => recipes.map((r) => (r.id === recipe.id ? recipe : r)));
+        persist('recipe', remote.updateRecipe(recipe));
+      },
+      deleteRecipe: (id) => {
+        apply('recipes', (recipes) => recipes.filter((r) => r.id !== id));
+        persist('recipe delete', remote.deleteRecipe(id));
+      },
+      setNutritionGoals: (goals) => {
+        apply('nutritionGoals', () => goals);
+        if (userId) persist('nutrition goals', remote.upsertNutritionGoals(userId, goals));
       },
       setPreferences: (preferences) => {
         apply('preferences', () => preferences);

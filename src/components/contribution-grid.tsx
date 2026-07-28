@@ -1,6 +1,6 @@
-import Svg, { Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Text as SvgText } from 'react-native-svg';
 
-import { Colors, Fonts, Spacing } from '@/constants/theme';
+import { Colors, Fonts } from '@/constants/theme';
 import { toDateKey } from '@/lib/store/derive';
 import type { CardioSession, Session } from '@/lib/store/types';
 
@@ -8,17 +8,26 @@ const GAP = 3;
 const LABEL_HEIGHT = 16;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** GitHub-style year-to-date grid; cell intensity scales with session duration. */
+/**
+ * Dot-matrix year-to-date grid; dot intensity scales with session duration.
+ * `inverted` renders dark dots for use on a bright (volt) card.
+ */
 export function ContributionGrid({
   sessions,
   cardioSessions = [],
   width,
+  inverted = false,
 }: {
   sessions: Session[];
   cardioSessions?: CardioSession[];
   width: number;
+  inverted?: boolean;
 }) {
   if (width <= 0) return null;
+
+  const filledColor = inverted ? Colors.background : Colors.primary;
+  const emptyColor = inverted ? 'rgba(8,8,13,0.14)' : Colors.border;
+  const labelColor = inverted ? 'rgba(8,8,13,0.65)' : Colors.textSecondary;
 
   const today = new Date();
   const jan1 = new Date(today.getFullYear(), 0, 1);
@@ -59,7 +68,7 @@ export function ContributionGrid({
       cells.push({
         x: week * (cellSize + GAP),
         y: LABEL_HEIGHT + day * (cellSize + GAP),
-        fill: minutes > 0 ? Colors.primary : Colors.border,
+        fill: minutes > 0 ? filledColor : emptyColor,
         opacity: minutes === 0 ? 1 : minutes < 30 ? 0.45 : minutes < 45 ? 0.75 : 1,
       });
     }
@@ -74,18 +83,16 @@ export function ContributionGrid({
           y={11}
           fontSize={10}
           fontFamily={Fonts.medium}
-          fill={Colors.textSecondary}>
+          fill={labelColor}>
           {month.label}
         </SvgText>
       ))}
       {cells.map((cell, index) => (
-        <Rect
+        <Circle
           key={index}
-          x={cell.x}
-          y={cell.y}
-          width={cellSize}
-          height={cellSize}
-          rx={Spacing.half}
+          cx={cell.x + cellSize / 2}
+          cy={cell.y + cellSize / 2}
+          r={cellSize / 2}
           fill={cell.fill}
           opacity={cell.opacity}
         />

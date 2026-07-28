@@ -1,3 +1,4 @@
+import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
@@ -9,9 +10,12 @@ import { ActivityRings } from '@/components/activity-rings';
 import { GradientFill } from '@/components/gradient-fill';
 import { SortableList } from '@/components/sortable-list';
 import { Stepper } from '@/components/stepper';
+import { SummaryStat } from '@/components/summary-stat';
 import { ThemedText } from '@/components/themed-text';
+import { TimerText } from '@/components/timer-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
+import { formatDuration } from '@/lib/format';
 import { currentGoalValue, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, RoutineExercise, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
@@ -332,9 +336,9 @@ export default function ActiveWorkoutScreen() {
           />
 
           <View style={styles.summaryRow}>
-            <SummaryStat value={`${session.durationMinutes}`} unit="min" label="Duration" />
-            <SummaryStat value={`${session.calories ?? workoutCalories}`} unit="cal" label="Calories" />
-            <SummaryStat value={`${completedSets}`} unit="sets" label="Completed" />
+            <SummaryStat animatedValue={session.durationMinutes} unit="min" label="Duration" />
+            <SummaryStat animatedValue={session.calories ?? workoutCalories} unit="cal" label="Calories" />
+            <SummaryStat animatedValue={completedSets} unit="sets" label="Completed" />
           </View>
 
           <ScrollView style={styles.flex} contentContainerStyle={styles.finishedList}>
@@ -537,7 +541,12 @@ export default function ActiveWorkoutScreen() {
         )}
 
         {phase === 'setActive' && exerciseKind === 'reps' && (
-          <Pressable style={styles.primaryButton} onPress={() => completeSet()}>
+          <Pressable
+            style={styles.primaryButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              completeSet();
+            }}>
             <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Complete Set
@@ -553,9 +562,7 @@ export default function ActiveWorkoutScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               {Math.round(overallProgress * 100)}% complete
             </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {formatDuration(elapsedSec)}
-            </ThemedText>
+            <TimerText seconds={elapsedSec} size="sm" themeColor="textSecondary" />
           </View>
         </View>
       </SafeAreaView>
@@ -851,13 +858,14 @@ function CountdownTimer({
       if (left === 0 && !called.current) {
         called.current = true;
         clearInterval(interval);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onDone();
       }
     }, 250);
     return () => clearInterval(interval);
   }, [onDone, seconds]);
 
-  const size = 140;
+  const size = 160;
   const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -884,7 +892,7 @@ function CountdownTimer({
           />
         </Svg>
         <View style={styles.timerLabel}>
-          <ThemedText type="subtitle">{formatDuration(remaining)}</ThemedText>
+          <TimerText seconds={remaining} size="sm" ticking />
         </View>
       </View>
       {nextLabel ? (
@@ -1000,23 +1008,6 @@ function InlineStepper({
   );
 }
 
-function SummaryStat({ value, unit, label }: { value: string; unit: string; label: string }) {
-  return (
-    <View style={styles.summaryStat}>
-      <ThemedText type="subtitle" style={styles.summaryValue}>
-        {value}
-        <ThemedText type="small" themeColor="textSecondary">
-          {' '}
-          {unit}
-        </ThemedText>
-      </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
-    </View>
-  );
-}
-
 function describeExercise(exercise: WorkoutExercise, unitSystem: UnitSystem): string {
   const mainRestLabel = `, ${formatDuration(exercise.targetRestSec ?? REST_SECONDS)} rest`;
   const warmupTargets = setTargetsFor(exercise, true);
@@ -1047,12 +1038,6 @@ function formatSetLog(set: { reps?: number; weight?: number; durationSec?: numbe
 function formatCurrentSetLabel(setIndex: number, warmupSets: number, workingSets: number): string {
   if (setIndex < warmupSets) return `Warm-up ${setIndex + 1} of ${warmupSets}`;
   return `Set ${setIndex - warmupSets + 1} of ${workingSets}`;
-}
-
-function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({
@@ -1315,13 +1300,6 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  summaryStat: {
-    gap: Spacing.half,
-  },
-  summaryValue: {
-    fontSize: 26,
-    lineHeight: 30,
   },
   finishedList: {
     gap: Spacing.two,

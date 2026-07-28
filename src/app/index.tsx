@@ -12,9 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { GitFitLogo } from '@/components/gitfit-logo';
 import { GoogleIcon } from '@/components/google-icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { WORDMARK } from '@/constants/brand';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { authErrorMessage } from '@/lib/auth-errors';
@@ -112,8 +114,11 @@ export default function LoginScreen() {
             contentContainerStyle={styles.form}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
+            <View style={styles.logoRow}>
+              <GitFitLogo size={64} gradient />
+            </View>
             <ThemedText type="subtitle" style={styles.title}>
-              GitFit
+              {WORDMARK}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.title}>
               Sign in to track your workouts
@@ -292,6 +297,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   form: { flexGrow: 1, justifyContent: 'center', gap: Spacing.three, paddingVertical: Spacing.four },
   title: { textAlign: 'center' },
+  logoRow: { alignItems: 'center' },
   field: { gap: Spacing.one },
   input: {
     borderRadius: Radius.sm,

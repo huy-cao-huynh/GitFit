@@ -1,10 +1,10 @@
-import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
+import { GitFitLogo } from '@/components/gitfit-logo';
 import { Colors } from '@/constants/theme';
 
 const DURATION = 600;
@@ -34,7 +34,7 @@ export function AnimatedSplashOverlay() {
     },
   });
 
-  const image = <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />;
+  const image = <GitFitLogo size={96} gradient />;
 
   return animate ? (
     <Animated.View
@@ -61,10 +61,6 @@ export function AnimatedSplashOverlay() {
 }
 
 const styles = StyleSheet.create({
-  image: {
-    width: 76,
-    height: 71,
-  },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
     backgroundColor: Colors.background,

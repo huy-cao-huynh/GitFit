@@ -139,6 +139,44 @@ export interface MeasurementEntry {
   unit: string;
 }
 
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+/** Macro totals; also the shape of a day's summed intake. */
+export interface Macros {
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+/** One logged food (or recipe serving) on a date, nutrients snapshotted at log time. */
+export interface FoodLogEntry extends Macros {
+  id: string;
+  date: string; // YYYY-MM-DD (local)
+  meal: MealType;
+  name: string;
+  brand?: string;
+  /** Amount logged, canonical grams; undefined for serving-based entries (recipes). */
+  grams?: number;
+}
+
+/** Ingredient macros are for the amount used in the whole recipe. */
+export interface RecipeIngredient extends Macros {
+  id: string;
+  name: string;
+  grams?: number;
+}
+
+export interface Recipe {
+  id: string;
+  name: string;
+  servings: number;
+  ingredients: RecipeIngredient[];
+}
+
+/** Daily intake targets; null until the user sets them. */
+export type NutritionGoals = Macros;
+
 export interface ProgressPoint {
   date: string;
   value: number;
@@ -163,5 +201,8 @@ export interface StoreData {
   waterEntries: WaterEntry[];
   measurementDefs: MeasurementDef[];
   measurementEntries: MeasurementEntry[];
+  foodLogs: FoodLogEntry[];
+  recipes: Recipe[];
+  nutritionGoals: NutritionGoals | null;
   preferences: Preferences;
 }

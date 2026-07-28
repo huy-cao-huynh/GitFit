@@ -8,8 +8,12 @@ import type {
   CardioSession,
   CheckoffDef,
   CheckoffLog,
+  FoodLogEntry,
   GoalDef,
+  Macros,
+  MealType,
   ProgressPoint,
+  Recipe,
   Routine,
   Session,
   WaterEntry,
@@ -353,4 +357,82 @@ export function bodyFatPercent(bmiValue: number | null, ageYears: number | null,
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+// ---------------------------------------------------------------------------
+// Nutrition
+// ---------------------------------------------------------------------------
+
+export const MEAL_ORDER: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+
+export const MEAL_LABELS: Record<MealType, string> = {
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+  snack: 'Snacks',
+};
+
+export const EMPTY_MACROS: Macros = { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 };
+
+export function addMacros(a: Macros, b: Macros): Macros {
+  return {
+    calories: a.calories + b.calories,
+    proteinG: a.proteinG + b.proteinG,
+    carbsG: a.carbsG + b.carbsG,
+    fatG: a.fatG + b.fatG,
+  };
+}
+
+export function scaleMacros(macros: Macros, factor: number): Macros {
+  return {
+    calories: round1(macros.calories * factor),
+    proteinG: round1(macros.proteinG * factor),
+    carbsG: round1(macros.carbsG * factor),
+    fatG: round1(macros.fatG * factor),
+  };
+}
+
+/** A day's food logs grouped by meal, plus summed macro totals. */
+export function nutritionForDate(
+  foodLogs: FoodLogEntry[],
+  date: string,
+): { totals: Macros; byMeal: Record<MealType, FoodLogEntry[]> } {
+  const byMeal: Record<MealType, FoodLogEntry[]> = { breakfast: [], lunch: [], dinner: [], snack: [] };
+  let totals = EMPTY_MACROS;
+  for (const entry of foodLogs) {
+    if (entry.date !== date) continue;
+    byMeal[entry.meal].push(entry);
+    totals = addMacros(totals, entry);
+  }
+  return { totals, byMeal };
+}
+
+/** Whole-recipe macro totals (sum of ingredients). */
+export function recipeTotals(recipe: Recipe): Macros {
+  return recipe.ingredients.reduce<Macros>((sum, ingredient) => addMacros(sum, ingredient), EMPTY_MACROS);
+}
+
+/** Macros for one serving of a recipe. */
+export function recipePerServing(recipe: Recipe): Macros {
+  return scaleMacros(recipeTotals(recipe), 1 / Math.max(1, recipe.servings));
+}
+
+/** Date key shifted by whole days (negative = past). */
+export function shiftDateKey(dateKey: string, days: number): string {
+  const date = new Date(`${dateKey}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+}
+
+/** "Today", "Yesterday", or a short weekday+date label for the day header. */
+export function dayLabel(dateKey: string): string {
+  const today = todayKey();
+  if (dateKey === today) return 'Today';
+  if (dateKey === shiftDateKey(today, -1)) return 'Yesterday';
+  if (dateKey === shiftDateKey(today, 1)) return 'Tomorrow';
+  return new Date(`${dateKey}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
 }

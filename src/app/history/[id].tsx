@@ -3,9 +3,11 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
+import { SummaryStat } from '@/components/summary-stat';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { formatDuration } from '@/lib/format';
 import type { SessionExercise } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
@@ -70,25 +72,6 @@ export default function HistoryDetailScreen() {
   );
 }
 
-function SummaryStat({ value, unit, label }: { value: string; unit: string; label: string }) {
-  return (
-    <View style={styles.summaryStat}>
-      <ThemedText type="subtitle" style={styles.summaryValue}>
-        {value}
-        {unit ? (
-          <ThemedText type="small" themeColor="textSecondary">
-            {' '}
-            {unit}
-          </ThemedText>
-        ) : null}
-      </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
-    </View>
-  );
-}
-
 function ExerciseCard({ exercise }: { exercise: SessionExercise }) {
   return (
     <ThemedView type="surface" style={styles.exerciseCard}>
@@ -126,12 +109,6 @@ function formatSetDetail(set: { weight?: number; durationSec?: number; skipped?:
   return (set.weight ?? 0) > 0 ? `${set.weight} lbs` : 'bodyweight';
 }
 
-function formatDuration(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -161,13 +138,6 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  summaryStat: {
-    gap: Spacing.half,
-  },
-  summaryValue: {
-    fontSize: 26,
-    lineHeight: 30,
   },
   exerciseCard: {
     borderRadius: Radius.lg,

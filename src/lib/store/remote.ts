@@ -15,12 +15,17 @@ import type {
   CheckoffDef,
   CheckoffLog,
   ExerciseKind,
+  FoodLogEntry,
   GoalDef,
   Goals,
   GoalType,
+  MealType,
   MeasurementDef,
   MeasurementEntry,
+  NutritionGoals,
   Preferences,
+  Recipe,
+  RecipeIngredient,
   Routine,
   RoutineExercise,
   Session,
@@ -149,6 +154,45 @@ interface MeasurementEntryRow {
   unit: string;
 }
 
+interface FoodLogRow {
+  id: string;
+  date: string;
+  meal: MealType;
+  name: string;
+  brand: string | null;
+  grams: number | null;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+interface RecipeIngredientRow {
+  id: string;
+  recipe_id: string;
+  position: number;
+  name: string;
+  grams: number | null;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+interface RecipeRow {
+  id: string;
+  name: string;
+  servings: number;
+  recipe_ingredients: RecipeIngredientRow[];
+}
+
+interface NutritionGoalsRow {
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
 // ---------------------------------------------------------------------------
 // Row -> app-type mapping
 // ---------------------------------------------------------------------------
@@ -256,6 +300,43 @@ function mapCheckoffLog(rows: CheckoffLogRow[]): CheckoffLog {
   return log;
 }
 
+function mapFoodLog(row: FoodLogRow): FoodLogEntry {
+  return {
+    id: row.id,
+    date: row.date,
+    meal: row.meal,
+    name: row.name,
+    brand: row.brand ?? undefined,
+    grams: row.grams ?? undefined,
+    calories: row.calories,
+    proteinG: row.protein_g,
+    carbsG: row.carbs_g,
+    fatG: row.fat_g,
+  };
+}
+
+function mapRecipe(row: RecipeRow): Recipe {
+  return {
+    id: row.id,
+    name: row.name,
+    servings: row.servings,
+    ingredients: byPosition(row.recipe_ingredients).map((ingredient) => ({
+      id: ingredient.id,
+      name: ingredient.name,
+      grams: ingredient.grams ?? undefined,
+      calories: ingredient.calories,
+      proteinG: ingredient.protein_g,
+      carbsG: ingredient.carbs_g,
+      fatG: ingredient.fat_g,
+    })),
+  };
+}
+
+function mapNutritionGoals(row: NutritionGoalsRow | null): NutritionGoals | null {
+  if (!row) return null;
+  return { calories: row.calories, proteinG: row.protein_g, carbsG: row.carbs_g, fatG: row.fat_g };
+}
+
 // ---------------------------------------------------------------------------
 // Fetch
 // ---------------------------------------------------------------------------
@@ -266,8 +347,43 @@ function unwrap<T>(result: { data: T | null; error: { message: string } | null }
   return result.data;
 }
 
+/**
+ * Nutrition tables arrived in migration 0005; fetch them separately so a
+ * project that hasn't applied it yet degrades to empty nutrition slices
+ * instead of failing the whole hydration.
+ */
+async function fetchNutritionData(): Promise<
+  Pick<StoreData, 'foodLogs' | 'recipes' | 'nutritionGoals'>
+> {
+  try {
+    const [foodLogs, recipes, nutritionGoals] = await Promise.all([
+      supabase
+        .from('food_logs')
+        .select('*')
+        .order('date', { ascending: false })
+        .order('created_at')
+        .returns<FoodLogRow[]>(),
+      supabase
+        .from('recipes')
+        .select('*, recipe_ingredients(*)')
+        .order('position')
+        .returns<RecipeRow[]>(),
+      supabase.from('nutrition_goals').select('*').maybeSingle<NutritionGoalsRow>(),
+    ]);
+    return {
+      foodLogs: unwrap(foodLogs).map(mapFoodLog),
+      recipes: unwrap(recipes).map(mapRecipe),
+      nutritionGoals: mapNutritionGoals(nutritionGoals.error ? null : nutritionGoals.data),
+    };
+  } catch (error) {
+    console.warn('Failed to fetch nutrition data (migration 0005 applied?)', error);
+    return { foodLogs: [], recipes: [], nutritionGoals: null };
+  }
+}
+
 /** Loads the user's entire store in parallel; throws on the first failure. */
 export async function fetchStoreData(): Promise<StoreData> {
+  const nutritionPromise = fetchNutritionData();
   const [
     profile,
     routines,
@@ -330,6 +446,7 @@ export async function fetchStoreData(): Promise<StoreData> {
     waterEntries: unwrap(waterEntries),
     measurementDefs: unwrap(measurementDefs).map(({ id, label, unit }) => ({ id, label, unit })),
     measurementEntries: unwrap(measurementEntries),
+    ...(await nutritionPromise),
     // The migration's trigger/backfill guarantees a profile row; fall back
     // to the default rather than failing hydration if it's somehow missing.
     preferences: { unitSystem: profile.data?.unit_system ?? 'imperial' },
@@ -550,6 +667,98 @@ export async function insertMeasurementEntry(entry: MeasurementEntry): Promise<v
     label: entry.label,
     value: entry.value,
     unit: entry.unit,
+  });
+  throwIfError(error);
+}
+
+function foodLogToRow(entry: FoodLogEntry) {
+  return {
+    id: entry.id,
+    date: entry.date,
+    meal: entry.meal,
+    name: entry.name,
+    brand: entry.brand ?? null,
+    grams: entry.grams ?? null,
+    calories: entry.calories,
+    protein_g: entry.proteinG,
+    carbs_g: entry.carbsG,
+    fat_g: entry.fatG,
+  };
+}
+
+export async function insertFoodLog(entry: FoodLogEntry): Promise<void> {
+  const { error } = await supabase.from('food_logs').insert(foodLogToRow(entry));
+  throwIfError(error);
+}
+
+export async function updateFoodLog(entry: FoodLogEntry): Promise<void> {
+  const { error } = await supabase.from('food_logs').update(foodLogToRow(entry)).eq('id', entry.id);
+  throwIfError(error);
+}
+
+export async function deleteFoodLog(id: string): Promise<void> {
+  const { error } = await supabase.from('food_logs').delete().eq('id', id);
+  throwIfError(error);
+}
+
+function recipeIngredientToRow(recipeId: string, ingredient: RecipeIngredient, position: number) {
+  return {
+    id: ingredient.id,
+    recipe_id: recipeId,
+    position,
+    name: ingredient.name,
+    grams: ingredient.grams ?? null,
+    calories: ingredient.calories,
+    protein_g: ingredient.proteinG,
+    carbs_g: ingredient.carbsG,
+    fat_g: ingredient.fatG,
+  };
+}
+
+async function insertRecipeIngredients(recipe: Recipe): Promise<void> {
+  if (recipe.ingredients.length === 0) return;
+  const rows = recipe.ingredients.map((ingredient, index) =>
+    recipeIngredientToRow(recipe.id, ingredient, index),
+  );
+  const { error } = await supabase.from('recipe_ingredients').insert(rows);
+  throwIfError(error);
+}
+
+export async function insertRecipe(recipe: Recipe, position: number): Promise<void> {
+  const { error } = await supabase
+    .from('recipes')
+    .insert({ id: recipe.id, name: recipe.name, servings: recipe.servings, position });
+  throwIfError(error);
+  await insertRecipeIngredients(recipe);
+}
+
+export async function updateRecipe(recipe: Recipe): Promise<void> {
+  const { error } = await supabase
+    .from('recipes')
+    .update({ name: recipe.name, servings: recipe.servings })
+    .eq('id', recipe.id);
+  throwIfError(error);
+  // Replace strategy, matching updateRoutine: ingredients are few.
+  const { error: deleteError } = await supabase
+    .from('recipe_ingredients')
+    .delete()
+    .eq('recipe_id', recipe.id);
+  throwIfError(deleteError);
+  await insertRecipeIngredients(recipe);
+}
+
+export async function deleteRecipe(id: string): Promise<void> {
+  const { error } = await supabase.from('recipes').delete().eq('id', id);
+  throwIfError(error);
+}
+
+export async function upsertNutritionGoals(userId: string, goals: NutritionGoals): Promise<void> {
+  const { error } = await supabase.from('nutrition_goals').upsert({
+    user_id: userId,
+    calories: goals.calories,
+    protein_g: goals.proteinG,
+    carbs_g: goals.carbsG,
+    fat_g: goals.fatG,
   });
   throwIfError(error);
 }
