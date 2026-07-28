@@ -14,6 +14,7 @@ const PILL_INSET = Spacing.two;
 const TAB_ICONS: Record<string, SFSymbol> = {
   dashboard: 'house.fill',
   logging: 'target',
+  nutrition: 'fork.knife',
   progress: 'chart.line.uptrend.xyaxis',
   workouts: 'dumbbell',
   settings: 'gearshape',
