@@ -22,7 +22,7 @@ type Phase = 'idle' | 'active' | 'enteringDistance' | 'finished';
 
 export default function CardioSessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { routines, sessions, cardioSessions, goals, waterEntries, addCardioSession, preferences } =
+  const { routines, sessions, cardioSessions, goals, goalEntries, waterEntries, addCardioSession, preferences } =
     useStore();
   const unitSystem = preferences.unitSystem;
   const routine = routines.find((r) => r.id === id && r.category === 'cardio');
@@ -105,7 +105,7 @@ export default function CardioSessionScreen() {
             strokeWidth={15}
             gap={6}
             rings={goals.map((goal, index) => ({
-              progress: currentGoalValue(goal, sessions, updatedCardioSessions, waterEntries) / goal.target,
+              progress: currentGoalValue(goal, sessions, updatedCardioSessions, waterEntries, goalEntries) / goal.target,
               color: RingColors[index % RingColors.length],
               trackColor: colors.border,
             }))}
