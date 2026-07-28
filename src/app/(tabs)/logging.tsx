@@ -216,7 +216,7 @@ export default function LoggingScreen() {
               </ThemedText>
             </View>
 
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               CALENDAR
             </ThemedText>
             <ThemedView type="surface" style={styles.calendarCard}>
@@ -310,7 +310,7 @@ export default function LoggingScreen() {
               )}
             </ThemedView>
 
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               WEEKLY GOALS
             </ThemedText>
             <ThemedView type="surface" style={styles.card}>
@@ -326,7 +326,7 @@ export default function LoggingScreen() {
                   <View key={goal.id} style={[styles.goalRow, index > 0 && styles.rowDivider]}>
                     {goal.metric === 'manual' ? (
                       <Pressable style={styles.goalCheckin} hitSlop={6} onPress={() => checkInGoal(goal)}>
-                        <SymbolView name="plus" size={14} tintColor={colors.background} />
+                        <SymbolView name="plus" size={14} tintColor={colors.onPrimary} />
                       </Pressable>
                     ) : (
                       <View style={styles.goalIcon}>
@@ -440,7 +440,7 @@ export default function LoggingScreen() {
               )}
             </ThemedView>
 
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               TODAY
             </ThemedText>
             <ThemedView type="surface" style={styles.card}>
@@ -456,7 +456,7 @@ export default function LoggingScreen() {
                         styles.checkCircle,
                         done ? { backgroundColor: colors.primary } : { borderWidth: 2, borderColor: colors.border },
                       ]}>
-                      {done && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
+                      {done && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
                     </View>
                     <ThemedText type="small" style={styles.flex}>
                       {def.name}
@@ -485,7 +485,7 @@ export default function LoggingScreen() {
 
             {waterGoal && (
               <>
-                <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
                   WATER
                 </ThemedText>
                 <ThemedView type="surface" style={styles.card}>
@@ -562,7 +562,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
     marginTop: Spacing.two,
   },
   card: {
@@ -634,7 +633,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   calendarNumberDone: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
   calendarNumberMissed: {
     color: colors.textSecondary,
@@ -667,7 +666,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.volt,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },

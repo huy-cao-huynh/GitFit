@@ -184,13 +184,18 @@ export default function CardioSessionScreen() {
           </View>
 
           <View style={styles.timerArea}>
-            <ThemedText type="smallBold" themeColor="textSecondary">
+            <ThemedText type="label" themeColor="textSecondary">
               ELAPSED
             </ThemedText>
+            {/* The only DSEG7 on this screen — it's a live clock. The target
+                below it is a stat, so it reads in the serif numeral face. */}
             <TimerText seconds={elapsedSec} ticking />
             {routine.targetDistanceMiles ? (
               <ThemedText type="small" themeColor="textSecondary">
-                Target: {toDisplayDistance(routine.targetDistanceMiles, unitSystem)} {distanceUnitLabel(unitSystem)}
+                Target:{' '}
+                <ThemedText type="statInline">
+                  {toDisplayDistance(routine.targetDistanceMiles, unitSystem)} {distanceUnitLabel(unitSystem)}
+                </ThemedText>
               </ThemedText>
             ) : null}
           </View>
@@ -339,7 +344,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 17,
   },
   finishedHeader: {

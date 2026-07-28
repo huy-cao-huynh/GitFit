@@ -7,6 +7,12 @@ import { Colors } from '@/constants/theme';
 export interface GradientStop {
   offset: number;
   color: string;
+  /**
+   * Stop alpha (0–1). Must be given separately: react-native-svg ignores the
+   * alpha channel of an `rgba()` string in `stopColor`, so a translucent stop
+   * written as rgba renders fully opaque.
+   */
+  opacity?: number;
 }
 
 /**
@@ -42,7 +48,7 @@ export function GradientFill({
   const axis = { x1: 0.5 - dx, y1: 0.5 - dy, x2: 0.5 + dx, y2: 0.5 + dy };
 
   const stopElements = resolvedStops.map((stop) => (
-    <Stop key={stop.offset} offset={stop.offset} stopColor={stop.color} />
+    <Stop key={stop.offset} offset={stop.offset} stopColor={stop.color} stopOpacity={stop.opacity ?? 1} />
   ));
 
   return (

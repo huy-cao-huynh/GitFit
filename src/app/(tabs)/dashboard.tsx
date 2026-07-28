@@ -61,7 +61,7 @@ export default function DashboardScreen() {
 
   return (
     <TabFadeView style={styles.container}>
-      <ScreenBackground pattern="dots">
+      <ScreenBackground>
         <SafeAreaView edges={['top']} style={styles.safeArea}>
           <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
@@ -77,7 +77,7 @@ export default function DashboardScreen() {
           </View>
 
           <View style={styles.sectionHeader}>
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               TODAY
             </ThemedText>
             <Pressable hitSlop={8} onPress={() => router.push('/logging')}>
@@ -104,7 +104,7 @@ export default function DashboardScreen() {
                   onPress={() => router.push(path)}
                   disabled={task.completed}>
                   <View style={[styles.checkCircle, task.completed ? styles.checkCircleDone : styles.checkCircleTodo]}>
-                    {task.completed && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
+                    {task.completed && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
                   </View>
                   <View style={styles.todayText}>
                     <ThemedText type="smallBold">{task.routine.name}</ThemedText>
@@ -142,7 +142,7 @@ export default function DashboardScreen() {
                         ? { backgroundColor: colors.primary }
                         : { borderWidth: 2, borderColor: colors.border },
                     ]}>
-                    {done && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
+                    {done && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
                   </View>
                   <ThemedText type="small" themeColor={done ? 'textSecondary' : 'text'} style={styles.checkLabel}>
                     {def.name}
@@ -216,9 +216,9 @@ export default function DashboardScreen() {
             onPress={() => router.push('/workout/choose')}>
             <GradientFill stops={Gradients.ctaHero} angle={120} />
             <Svg width={14} height={16} viewBox="0 0 14 16">
-              <Path d="M0 0l14 8-14 8z" fill={colors.text} />
+              <Path d="M0 0l14 8-14 8z" fill={colors.onPrimary} />
             </Svg>
-            <ThemedText type="heading" style={styles.startButtonText}>
+            <ThemedText type="button" style={styles.startButtonText}>
               Start Workout
             </ThemedText>
           </Pressable>
@@ -250,10 +250,12 @@ function LegendStat({
     <View style={styles.legendStat}>
       <View style={[styles.legendDot, { backgroundColor: color }]} />
       <ThemedText type="small">
-        <ThemedText type="smallBold">{displayValue}</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          /{displayTarget} {unitLabel}
+        <ThemedText type="statInline">{displayValue}</ThemedText>
+        <ThemedText type="statInline" themeColor="textSecondary">
+          /{displayTarget}
         </ThemedText>
+        {/* The unit is what names the number — it stays full contrast. */}
+        <ThemedText type="small"> {unitLabel}</ThemedText>
       </ThemedText>
     </View>
   );
@@ -354,13 +356,12 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   startButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 20,
     lineHeight: 28,
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   sectionHeader: {
     flexDirection: 'row',

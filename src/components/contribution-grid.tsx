@@ -26,8 +26,8 @@ export function ContributionGrid({
   if (width <= 0) return null;
 
   const filledColor = inverted ? Colors.background : Colors.primary;
-  const emptyColor = inverted ? 'rgba(8,8,13,0.14)' : Colors.border;
-  const labelColor = inverted ? 'rgba(8,8,13,0.65)' : Colors.textSecondary;
+  const emptyColor = inverted ? Colors.onPrimaryFaint : Colors.border;
+  const labelColor = inverted ? Colors.onPrimaryDim : Colors.textSecondary;
 
   const today = new Date();
   const jan1 = new Date(today.getFullYear(), 0, 1);
@@ -81,7 +81,7 @@ export function ContributionGrid({
           key={month.label}
           x={month.x}
           y={11}
-          fontSize={10}
+          fontSize={11}
           fontFamily={Fonts.medium}
           fill={labelColor}>
           {month.label}

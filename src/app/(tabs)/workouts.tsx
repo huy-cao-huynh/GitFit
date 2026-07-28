@@ -53,7 +53,7 @@ export default function WorkoutsScreen() {
             const active = category === option;
             return (
               <Pressable key={option} style={styles.segment} onPress={() => setCategory(option)}>
-                <ThemedText type="smallBold" style={active ? { color: colors.text } : undefined}>
+                <ThemedText type="smallBold" style={active ? { color: colors.onPrimary } : undefined}>
                   {CATEGORY_LABELS[option]}
                 </ThemedText>
               </Pressable>
@@ -70,7 +70,7 @@ export default function WorkoutsScreen() {
               style={styles.createRow}
               onPress={() => router.push(category === 'strength' ? '/routine/new' : '/cardio-routine/new')}>
               <View style={styles.createIcon}>
-                <SymbolView name="plus" size={16} tintColor={colors.text} />
+                <SymbolView name="plus" size={16} tintColor={colors.onPrimary} />
               </View>
               <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                 New {CATEGORY_LABELS[category]} Workout
@@ -121,9 +121,9 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
         </View>
         <View style={styles.routineText}>
           <ThemedText type="smallBold">{routine.name}</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {subtitle}
-          </ThemedText>
+          {/* Exercise count / duration / schedule are the card's whole payload —
+              they carry information, so they aren't dimmed. */}
+          <ThemedText type="small">{subtitle}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             {schedule}
           </ThemedText>
@@ -131,10 +131,10 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
         <Pressable hitSlop={8} style={styles.playButton} onPress={goToPlay}>
           <GradientFill stops={Gradients.cta} />
           <Svg width={12} height={14} viewBox="0 0 14 16">
-            <Path d="M0 0l14 8-14 8z" fill={colors.text} />
+            <Path d="M0 0l14 8-14 8z" fill={colors.onPrimary} />
           </Svg>
         </Pressable>
-        <Chevron color={colors.textMuted} />
+        <Chevron color={colors.textSecondary} />
       </ThemedView>
     </Pressable>
   );

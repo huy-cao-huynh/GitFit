@@ -321,7 +321,9 @@ const styles = StyleSheet.create({
   },
   pillPrimary: { borderColor: Colors.text },
   pillGoogle: { borderColor: Colors.text },
-  pillPressed: { borderColor: Colors.primary, backgroundColor: Colors.primary },
+  // Tint rather than a full lime fill: these pills keep light text, which a
+  // solid lime background would make unreadable.
+  pillPressed: { borderColor: Colors.primary, backgroundColor: Colors.primaryTint },
   divider: { textAlign: 'center' },
   disabled: { opacity: 0.5 },
   error: { color: Colors.danger, textAlign: 'center' },

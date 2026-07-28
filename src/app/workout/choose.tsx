@@ -76,7 +76,7 @@ export default function ChooseWorkoutScreen() {
             </View>
           }
           renderSectionHeader={({ section }) => (
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               {section.title.toUpperCase()}
             </ThemedText>
           )}
@@ -121,7 +121,7 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
             {subtitle}
           </ThemedText>
         </View>
-        <Chevron color={colors.textMuted} />
+        <Chevron color={colors.textSecondary} />
       </ThemedView>
     </Pressable>
   );
@@ -160,7 +160,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
     marginTop: Spacing.three,
     marginBottom: Spacing.one,
   },
@@ -190,7 +189,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   createIconText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 20,
   },
   routineCard: {

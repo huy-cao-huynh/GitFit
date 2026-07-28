@@ -152,7 +152,7 @@ export default function ProgressScreen() {
 
           {chartWidth > 0 && (
             <>
-              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+              <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
                 DAY TRACKING
               </ThemedText>
               <View style={[styles.card, styles.invertedCard]}>
@@ -161,7 +161,7 @@ export default function ProgressScreen() {
                     <ThemedText type="small" style={styles.invertedTextDim}>
                       Workout activity
                     </ThemedText>
-                    <ThemedText type="subtitle" style={[styles.statValue, styles.invertedText]}>
+                    <ThemedText type="stat" style={styles.invertedText}>
                       Year to date
                     </ThemedText>
                   </View>
@@ -174,7 +174,7 @@ export default function ProgressScreen() {
             </>
           )}
 
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
             TRACKING
           </ThemedText>
 
@@ -236,7 +236,7 @@ export default function ProgressScreen() {
             </View>
           )}
 
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
             BODY
           </ThemedText>
 
@@ -286,7 +286,7 @@ export default function ProgressScreen() {
             )}
           </ThemedView>
 
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
             MEASUREMENTS
           </ThemedText>
 
@@ -297,10 +297,10 @@ export default function ProgressScreen() {
               <ThemedView key={def.id} type="surface" style={styles.card}>
                 <View style={styles.measurementHeader}>
                   <View style={styles.flex}>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {def.label}
+                    <ThemedText type="small">
+
                     </ThemedText>
-                    <ThemedText type="subtitle" style={styles.statValue}>
+                    <ThemedText type="stat">
                       {latest ? `${latest.value} ${latest.unit}` : 'No logs'}
                     </ThemedText>
                   </View>
@@ -358,7 +358,7 @@ export default function ProgressScreen() {
           </ThemedView>
 
           <View style={styles.strengthHeader}>
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               STRENGTH
             </ThemedText>
             {names.length > 0 && (
@@ -410,14 +410,12 @@ function StatTile({
 }) {
   return (
     <ThemedView type="surface" style={styles.tile}>
-      <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+      <ThemedText type="small" numberOfLines={1}>
         {label}
       </ThemedText>
       <View style={styles.tileValueRow}>
         <AnimatedNumber value={value} style={styles.tileValue} />
-        <ThemedText type="small" themeColor="textSecondary">
-          {unit}
-        </ThemedText>
+        <ThemedText type="small">{unit}</ThemedText>
       </View>
       <LineChart points={points} width={chartWidth} height={56} color={color} sparkline />
     </ThemedView>
@@ -450,18 +448,16 @@ function deltaCaption(points: ProgressPoint[], unit: string): string {
 }
 
 function StatHeader({ label, latest, caption }: { label: string; latest: string; caption?: string }) {
+  // deltaCaption prefixes gains with '+' — those read as wins, so they go lime.
+  const isGain = caption?.startsWith('+');
   return (
     <View style={styles.statHeader}>
       <View>
-        <ThemedText type="small" themeColor="textSecondary">
-          {label}
-        </ThemedText>
-        <ThemedText type="subtitle" style={styles.statValue}>
-          {latest}
-        </ThemedText>
+        <ThemedText type="small">{label}</ThemedText>
+        <ThemedText type="stat">{latest}</ThemedText>
       </View>
       {caption ? (
-        <ThemedText type="small" themeColor="textSecondary">
+        <ThemedText type="statInline" themeColor={isGain ? 'primary' : 'textSecondary'}>
           {caption}
         </ThemedText>
       ) : null}
@@ -571,7 +567,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
     marginTop: Spacing.two,
   },
   metricRangeRow: {
@@ -592,14 +587,14 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   invertedCard: {
-    backgroundColor: colors.volt,
+    backgroundColor: colors.primary,
     borderColor: 'transparent',
   },
   invertedText: {
-    color: colors.background,
+    color: colors.onPrimary,
   },
   invertedTextDim: {
-    color: 'rgba(8,8,13,0.65)',
+    color: Colors.onPrimaryDim,
   },
   tileGrid: {
     flexDirection: 'row',
@@ -621,7 +616,7 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   tileValue: {
-    ...Type.numeric,
+    ...Type.statSm,
     fontSize: 22,
     lineHeight: 28,
   },
@@ -651,10 +646,6 @@ const styles = StyleSheet.create({
   },
   unitInput: {
     width: 72,
-  },
-  statValue: {
-    fontSize: 26,
-    lineHeight: 30,
   },
   dropdown: {
     position: 'relative',

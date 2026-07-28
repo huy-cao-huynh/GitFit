@@ -152,7 +152,7 @@ export default function RecipeEditorScreen() {
               </View>
             </ThemedView>
 
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               INGREDIENTS
             </ThemedText>
 
@@ -171,7 +171,7 @@ export default function RecipeEditorScreen() {
                     onPress={() =>
                       setIngredients((current) => current.filter((candidate) => candidate.id !== draft.id))
                     }>
-                    <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textMuted} />
+                    <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
                   </Pressable>
                 </View>
                 <View style={styles.macroGrid}>
@@ -311,7 +311,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
     marginTop: Spacing.two,
   },
   ingredientHeader: {

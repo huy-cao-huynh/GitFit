@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   modeTextActive: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
   daysRow: {
     flexDirection: 'row',
@@ -151,6 +151,6 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   dayTextActive: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
 });

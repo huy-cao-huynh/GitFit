@@ -111,7 +111,7 @@ export default function FoodSearchScreen() {
                   key={option}
                   style={[styles.mealChip, active && styles.mealChipActive]}
                   onPress={() => setMeal(option)}>
-                  <ThemedText type="small" themeColor={active ? 'text' : 'textSecondary'}>
+                  <ThemedText type="small" themeColor={active ? 'onPrimary' : 'textSecondary'}>
                     {MEAL_LABELS[option]}
                   </ThemedText>
                 </Pressable>
@@ -191,7 +191,7 @@ export default function FoodSearchScreen() {
 
               {recipes.length > 0 && query.trim().length < 2 && (
                 <View style={styles.recipeSection}>
-                  <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                  <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
                     RECIPE BOOK
                   </ThemedText>
                   {recipes.map((recipe) => (
@@ -277,7 +277,7 @@ function AmountPanel({
               key={option}
               style={[styles.unitChip, unit === option && styles.unitChipActive]}
               onPress={() => switchUnit(option)}>
-              <ThemedText type="small" themeColor={unit === option ? 'text' : 'textSecondary'}>
+              <ThemedText type="small" themeColor={unit === option ? 'onPrimary' : 'textSecondary'}>
                 {option}
               </ThemedText>
             </Pressable>
@@ -442,7 +442,7 @@ function LabeledInput({
 function PreviewStat({ value, label, emphasized }: { value: number; label: string; emphasized?: boolean }) {
   return (
     <View style={styles.previewStat}>
-      <ThemedText type={emphasized ? 'numeric' : 'smallBold'} style={emphasized ? styles.previewEmphasis : undefined}>
+      <ThemedText type={emphasized ? 'stat' : 'smallBold'} style={emphasized ? styles.previewEmphasis : undefined}>
         {Math.round(value)}
       </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
@@ -535,7 +535,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   servingStepper: {
     flexDirection: 'row',
@@ -625,6 +624,6 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
 });

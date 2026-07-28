@@ -12,9 +12,10 @@ import { Colors, Type } from '@/constants/theme';
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 
 /**
- * Count-up stat number in the DSEG numeric face (fixed-width digits, so the
- * layout never jitters while animating). Animates to `value` on mount and on
- * every change. `suffix` is appended un-animated (e.g. " oz").
+ * Count-up stat number in the serif stat face (tabular figures, so the layout
+ * doesn't jitter while animating). Animates to `value` on mount and on every
+ * change. `suffix` is appended un-animated (e.g. " oz"). This is a stat, not a
+ * clock — the DSEG timer face is reserved for live workout/cardio timers.
  */
 export function AnimatedNumber({
   value,
@@ -52,7 +53,7 @@ export function AnimatedNumber({
 
 const styles = {
   number: {
-    ...Type.numeric,
+    ...Type.statMd,
     color: Colors.text,
     padding: 0,
   } as TextStyle,

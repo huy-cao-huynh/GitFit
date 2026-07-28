@@ -163,7 +163,7 @@ export default function RoutineEditorScreen() {
 
             <ScheduleDaySelector selectedDays={scheduledDays} onChange={setScheduledDays} />
 
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
               EXERCISES
             </ThemedText>
 
@@ -391,7 +391,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   exerciseCard: {
     borderRadius: Radius.lg,
@@ -475,7 +474,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   modeTextActive: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
   addRow: {
     flexDirection: 'row',

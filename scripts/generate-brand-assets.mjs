@@ -14,12 +14,15 @@ import sharp from 'sharp';
 const OUT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'images');
 
 // --- palette (mirror of src/constants/theme.ts) ---
-const BACKGROUND = '#08080D';
-const PRIMARY = '#3D8BFD';
-const PRIMARY_LIGHT = '#7EB3FF';
-const VOLT = '#D4F53C';
+const BACKGROUND = '#08080A';
+const PRIMARY = '#D4F53C';
+const PRIMARY_LIGHT = '#E6FF85';
 const WHITE = '#FFFFFF';
-const GLOW = 'rgba(61,139,253,0.28)';
+// The accent node strokes against the lime mark, mirroring GitFitLogo's rule
+// that the accent flips to near-white whenever the mark itself is lime.
+const ACCENT = WHITE;
+const GLOW = 'rgba(212,245,60,0.22)';
+const GLOW_EDGE = 'rgba(212,245,60,0)';
 
 // --- geometry (mirror of src/constants/brand.ts) ---
 const VIEW = 128;
@@ -37,7 +40,7 @@ const RING_STROKE = 5;
 /** The bare mark, sized to the 128 viewbox. */
 function markSvg({ gradient = true, mono = null } = {}) {
   const paint = mono ?? (gradient ? 'url(#logo-fill)' : PRIMARY);
-  const accentPaint = mono ?? VOLT;
+  const accentPaint = mono ?? ACCENT;
   const defs = gradient && !mono
     ? `<defs><linearGradient id="logo-fill" x1="0" y1="0" x2="1" y2="0">
          <stop offset="0" stop-color="${PRIMARY}"/>
@@ -66,7 +69,7 @@ function composeSvg({ size, background = null, glow = false, scale = 0.62, gradi
     ${background ? `<rect width="${size}" height="${size}" fill="${background}"/>` : ''}
     ${glow ? `<defs><radialGradient id="bg-glow" cx="0.5" cy="0.42" r="0.55">
         <stop offset="0" stop-color="${GLOW}"/>
-        <stop offset="1" stop-color="rgba(61,139,253,0)"/>
+        <stop offset="1" stop-color="${GLOW_EDGE}"/>
       </radialGradient></defs>
       <rect width="${size}" height="${size}" fill="url(#bg-glow)"/>` : ''}
     <g transform="translate(${offset} ${offset}) scale(${factor})">

@@ -7,7 +7,8 @@ import { Colors } from '@/constants/theme';
 /**
  * The commit-graph dumbbell mark (geometry in constants/brand.ts). Flat by
  * default; `gradient` paints the filled shapes primary → primaryLight. The
- * accent node always strokes volt.
+ * accent node strokes against whatever the rest of the mark is painted in —
+ * lime on a neutral mark, near-white on a lime one — so it never disappears.
  */
 export function GitFitLogo({
   size = 64,
@@ -20,6 +21,7 @@ export function GitFitLogo({
 }) {
   const gradientId = useId();
   const paint = gradient ? `url(#${gradientId})` : color;
+  const accent = gradient ? Colors.text : Colors.primary;
 
   return (
     <Svg width={size} height={size} viewBox={LOGO_VIEWBOX}>
@@ -49,7 +51,7 @@ export function GitFitLogo({
             cy={node.cy}
             r={node.r}
             fill="none"
-            stroke={node.accent ? Colors.volt : paint}
+            stroke={node.accent ? accent : paint}
             strokeWidth={LOGO_RING_STROKE}
           />
         ),

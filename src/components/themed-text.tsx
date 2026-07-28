@@ -16,17 +16,23 @@ export type ThemedTextProps = TextProps & {
     | 'display'
     | 'displayItalic'
     | 'heading'
+    | 'label'
+    | 'button'
+    | 'stat'
+    | 'statLarge'
+    | 'statSmall'
+    | 'statInline'
     | 'timer'
-    | 'timerSmall'
-    | 'numeric';
+    | 'timerSmall';
   themeColor?: ThemeColor;
 };
 
 /**
- * Text with the app's type scale (Type in theme.ts). `display`/`title` and
- * `subtitle` speak Fraunces serif; `timer`/`timerSmall`/`numeric` speak DSEG7
- * seven-segment (digits only — use for numbers, not labels). Nest a
- * `displayItalic` inside display copy for the serif-italic emphasis word.
+ * Text with the app's type scale (Type in theme.ts). Three voices with strict
+ * jobs: `display`/`title`/`subtitle`/`heading` and the `stat*` numerals speak
+ * Fraunces serif; `timer`/`timerSmall` speak DSEG7 and are reserved for live
+ * workout/cardio timers and in-session distance; everything else is Manrope.
+ * Nest a `displayItalic` inside display copy for the serif-italic emphasis word.
  */
 export function ThemedText({ style, type = 'default', themeColor, ...rest }: ThemedTextProps) {
   const theme = useTheme();
@@ -46,9 +52,14 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
         type === 'display' && styles.display,
         type === 'displayItalic' && styles.displayItalic,
         type === 'heading' && styles.heading,
+        type === 'label' && styles.label,
+        type === 'button' && styles.button,
+        type === 'stat' && styles.stat,
+        type === 'statLarge' && styles.statLarge,
+        type === 'statSmall' && styles.statSmall,
+        type === 'statInline' && styles.statInline,
         type === 'timer' && styles.timer,
         type === 'timerSmall' && styles.timerSmall,
-        type === 'numeric' && styles.numeric,
         style,
       ]}
       {...rest}
@@ -87,7 +98,12 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.displayItalic,
   },
   heading: Type.heading,
+  label: Type.label,
+  button: Type.button,
+  stat: Type.statMd,
+  statLarge: Type.statLg,
+  statSmall: Type.statSm,
+  statInline: Type.statXs,
   timer: Type.timerLg,
   timerSmall: Type.timerSm,
-  numeric: Type.numeric,
 });

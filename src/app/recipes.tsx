@@ -36,7 +36,7 @@ export default function RecipesScreen() {
           ListHeaderComponent={
             <Pressable style={styles.createRow} onPress={() => router.push('/recipe/new')}>
               <View style={styles.createIcon}>
-                <SymbolView name="plus" size={16} tintColor={colors.text} />
+                <SymbolView name="plus" size={16} tintColor={colors.onPrimary} />
               </View>
               <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                 New Recipe
@@ -56,7 +56,7 @@ export default function RecipesScreen() {
                     serving · {item.servings} servings
                   </ThemedText>
                 </View>
-                <Chevron color={colors.textMuted} />
+                <Chevron color={colors.textSecondary} />
               </Pressable>
             );
           }}

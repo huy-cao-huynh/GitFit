@@ -91,7 +91,7 @@ export default function FoodEntryScreen() {
                 key={option}
                 style={[styles.mealChip, active && styles.mealChipActive]}
                 onPress={() => setMeal(option)}>
-                <ThemedText type="small" themeColor={active ? 'text' : 'textSecondary'}>
+                <ThemedText type="small" themeColor={active ? 'onPrimary' : 'textSecondary'}>
                   {MEAL_LABELS[option]}
                 </ThemedText>
               </Pressable>
@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
   deleteButton: {
     alignItems: 'center',

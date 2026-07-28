@@ -182,7 +182,7 @@ export default function SettingsScreen() {
                           key={option}
                           style={[styles.sexButton, active && styles.sexButtonActive]}
                           onPress={() => setDraftSex(option)}>
-                          <ThemedText type="small" style={active ? { color: colors.text } : undefined}>
+                          <ThemedText type="small" style={active ? { color: colors.onPrimary } : undefined}>
                             {option === 'male' ? 'Male' : option === 'female' ? 'Female' : 'Skip'}
                           </ThemedText>
                         </Pressable>
@@ -218,7 +218,7 @@ export default function SettingsScreen() {
                     style={[styles.saveButton, isSaving && styles.disabled]}
                     disabled={isSaving}
                     onPress={handleSave}>
-                    <ThemedText type="smallBold" style={{ color: colors.text }}>
+                    <ThemedText type="smallBold" style={{ color: colors.onPrimary }}>
                       {isSaving ? 'Saving…' : 'Save'}
                     </ThemedText>
                   </Pressable>
@@ -233,7 +233,7 @@ export default function SettingsScreen() {
             )}
 
             <View>
-              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+              <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
                 UNITS
               </ThemedText>
               <ThemedView type="surface" style={[styles.section, styles.row]}>
@@ -279,7 +279,7 @@ function UnitToggle({ value, onChange }: { value: UnitSystem; onChange: (value: 
             key={option}
             style={[styles.unitButton, active && styles.unitButtonActive]}
             onPress={() => onChange(option)}>
-            <ThemedText type="small" style={active ? { color: colors.background } : undefined}>
+            <ThemedText type="small" style={active ? { color: colors.onPrimary } : undefined}>
               {option === 'imperial' ? 'lbs / mi' : 'kg / km'}
             </ThemedText>
           </Pressable>
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 22,
     lineHeight: 26,
   },
@@ -410,7 +410,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
     marginBottom: Spacing.two,
   },
   unitToggle: {

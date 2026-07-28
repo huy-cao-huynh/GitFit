@@ -45,7 +45,7 @@ export default function NutritionScreen() {
 
   return (
     <TabFadeView style={styles.container}>
-      <ScreenBackground pattern="dots">
+      <ScreenBackground>
         <SafeAreaView edges={['top']} style={styles.safeArea}>
           <ScrollView
             style={styles.scroll}
@@ -85,8 +85,8 @@ export default function NutritionScreen() {
               <View style={styles.summaryHeader}>
                 <View style={styles.calorieRow}>
                   <AnimatedNumber value={Math.round(totals.calories)} />
-                  <ThemedText type="small" themeColor="textSecondary">
-                    / {Math.round(goals.calories)} cal
+                  <ThemedText type="small">
+                    / <ThemedText type="statInline">{Math.round(goals.calories)}</ThemedText> cal
                   </ThemedText>
                 </View>
                 <Pressable hitSlop={8} onPress={() => setEditingGoals((editing) => !editing)}>
@@ -97,17 +97,22 @@ export default function NutritionScreen() {
                   />
                 </Pressable>
               </View>
-              <ThemedText type="small" themeColor={remaining >= 0 ? 'textSecondary' : 'warning'}>
-                {remaining >= 0 ? `${remaining} cal remaining` : `${-remaining} cal over target`}
+              <ThemedText type="small" themeColor={remaining >= 0 ? 'text' : 'warning'}>
+                <ThemedText type="statInline" themeColor={remaining >= 0 ? 'text' : 'warning'}>
+                  {Math.abs(remaining)}
+                </ThemedText>
+                {remaining >= 0 ? ' cal remaining' : ' cal over target'}
               </ThemedText>
 
-              <MacroBar label="Protein" value={totals.proteinG} target={goals.proteinG} color={colors.volt} />
-              <MacroBar label="Carbs" value={totals.carbsG} target={goals.carbsG} color={colors.primaryLight} />
-              <MacroBar label="Fat" value={totals.fatG} target={goals.fatG} color={colors.warning} />
+              {/* Lime for protein, then down the neutral ramp — the three bars
+                  read apart without a second hue. */}
+              <MacroBar label="Protein" value={totals.proteinG} target={goals.proteinG} color={colors.primary} />
+              <MacroBar label="Carbs" value={totals.carbsG} target={goals.carbsG} color={colors.text} />
+              <MacroBar label="Fat" value={totals.fatG} target={goals.fatG} color={colors.textSecondary} />
 
               {editingGoals && (
                 <View style={styles.goalEditor}>
-                  <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                  <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
                     DAILY TARGETS
                   </ThemedText>
                   <View style={styles.goalStepperRow}>
@@ -158,7 +163,7 @@ export default function NutritionScreen() {
               return (
                 <View key={meal} style={styles.mealSection}>
                   <View style={styles.mealHeader}>
-                    <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                    <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
                       {MEAL_LABELS[meal].toUpperCase()}
                     </ThemedText>
                     {mealCalories > 0 && (
@@ -212,18 +217,16 @@ function FoodRow({
         <ThemedText type="smallBold" numberOfLines={1}>
           {entry.name}
         </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+        <ThemedText type="small" numberOfLines={1}>
           {entry.brand ? `${entry.brand} · ` : ''}
           {entry.grams !== undefined ? `${Math.round(entry.grams)} g · ` : ''}
           {Math.round(entry.proteinG)}p / {Math.round(entry.carbsG)}c / {Math.round(entry.fatG)}f
         </ThemedText>
       </View>
-      <ThemedText type="smallBold">{Math.round(entry.calories)}</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        cal
-      </ThemedText>
+      <ThemedText type="statInline">{Math.round(entry.calories)}</ThemedText>
+      <ThemedText type="small">cal</ThemedText>
       <Pressable hitSlop={8} onPress={onDelete}>
-        <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textMuted} />
+        <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
       </Pressable>
     </Pressable>
   );
@@ -244,14 +247,13 @@ function MacroBar({
   return (
     <View style={styles.macroBar}>
       <View style={styles.macroLabels}>
-        <ThemedText type="small" themeColor="textSecondary">
-          {label}
-        </ThemedText>
+        <ThemedText type="small">{label}</ThemedText>
         <ThemedText type="small">
-          {Math.round(value)}
-          <ThemedText type="small" themeColor="textSecondary">
-            /{Math.round(target)} g
+          <ThemedText type="statInline">{Math.round(value)}</ThemedText>
+          <ThemedText type="statInline" themeColor="textSecondary">
+            /{Math.round(target)}
           </ThemedText>
+          {' g'}
         </ThemedText>
       </View>
       <View style={styles.macroTrack}>
@@ -335,7 +337,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   mealSection: {
     gap: Spacing.two,

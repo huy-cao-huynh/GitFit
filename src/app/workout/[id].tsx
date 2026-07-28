@@ -499,7 +499,7 @@ export default function ActiveWorkoutScreen() {
         </View>
 
         <View style={styles.exerciseHeader}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
+          <ThemedText type="label">
             {formatCurrentSetLabel(setIndex, warmupSetCount, exercise.sets).toUpperCase()}
           </ThemedText>
           <ThemedText type="subtitle">{exercise.name}</ThemedText>
@@ -609,9 +609,9 @@ export default function ActiveWorkoutScreen() {
           </View>
           <View style={styles.bottomStats}>
             <ThemedText type="small" themeColor="textSecondary">
-              {Math.round(overallProgress * 100)}% complete
+              <ThemedText type="statInline">{Math.round(overallProgress * 100)}%</ThemedText> complete
             </ThemedText>
-            <TimerText seconds={elapsedSec} size="sm" themeColor="textSecondary" />
+            <TimerText seconds={elapsedSec} size="sm" />
           </View>
         </View>
       </SafeAreaView>
@@ -670,7 +670,7 @@ function TargetCard({
       ) : null}
       {kind === 'time' ? (
         <View style={styles.targetColumn}>
-          <ThemedText type="title" style={styles.targetValue}>
+          <ThemedText type="statLarge" style={styles.targetValue}>
             {formatDuration(targets.durationSec)}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
@@ -680,7 +680,7 @@ function TargetCard({
       ) : (
         <View style={styles.targetRow}>
           <View style={styles.targetColumn}>
-            <ThemedText type="title" style={styles.targetValue}>
+            <ThemedText type="statLarge" style={styles.targetValue}>
               {targets.reps}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
@@ -689,7 +689,7 @@ function TargetCard({
           </View>
           <View style={styles.targetDivider} />
           <View style={styles.targetColumn}>
-            <ThemedText type="title" style={styles.targetValue}>
+            <ThemedText type="statLarge" style={styles.targetValue}>
               {toDisplayWeight(targets.weight, unitSystem)}
               <ThemedText type="small" style={{ color: colors.primaryLight }}>
                 {' '}
@@ -702,26 +702,30 @@ function TargetCard({
           </View>
         </View>
       )}
+      {/* These are the numbers you're training against — the caption stays
+          secondary, but every value reads at full contrast. */}
       {lastSet ? (
         <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
-          Last session, this set: {formatSetLog(lastSet, unitSystem)}
+          Last session, this set:{' '}
+          <ThemedText type="statInline">{formatSetLog(lastSet, unitSystem)}</ThemedText>
         </ThemedText>
       ) : exercise.lastTime ? (
         <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
-          Last time: {formatSetLog(exercise.lastTime, unitSystem)}
+          Last time:{' '}
+          <ThemedText type="statInline">{formatSetLog(exercise.lastTime, unitSystem)}</ThemedText>
         </ThemedText>
       ) : null}
       {personalRecord && (
         <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
           Best ever:{' '}
-          <ThemedText type="smallBold" style={{ color: colors.volt }}>
+          <ThemedText type="statInline" themeColor="primary">
             {toDisplayWeight(personalRecord.weight, unitSystem)} {weightUnitLabel(unitSystem)}
             {personalRecord.reps ? ` × ${personalRecord.reps}` : ''}
           </ThemedText>
         </ThemedText>
       )}
       <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
-        Rest: {formatDuration(targets.restSec)}
+        Rest: <ThemedText type="statInline">{formatDuration(targets.restSec)}</ThemedText>
       </ThemedText>
     </ThemedView>
   );
@@ -907,7 +911,7 @@ function ExerciseStatusRow({
           isCurrent && { borderColor: colors.primary },
         ]}>
         {isDone ? (
-          <SymbolView name="checkmark" size={12} tintColor={colors.text} />
+          <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />
         ) : (
           <ThemedText type="small" themeColor="textSecondary">
             {index + 1}
@@ -1177,7 +1181,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   modeTextActive: {
-    color: colors.text,
+    color: colors.onPrimary,
   },
   targetCard: {
     borderRadius: Radius.lg,
@@ -1192,10 +1196,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.half,
     paddingHorizontal: Spacing.two + Spacing.one,
     borderRadius: Radius.full,
-    backgroundColor: colors.volt,
+    backgroundColor: colors.primary,
   },
   prBadgeText: {
-    color: colors.background,
+    color: colors.onPrimary,
     letterSpacing: 0.6,
   },
   targetRow: {
@@ -1294,7 +1298,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 17,
   },
   bottomBar: {

@@ -101,7 +101,7 @@ export default function CardioRoutineEditorScreen() {
 
           <ScheduleDaySelector selectedDays={scheduledDays} onChange={setScheduledDays} />
 
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
             ACTIVITY
           </ThemedText>
           <View style={styles.activityGrid}>
@@ -112,7 +112,7 @@ export default function CardioRoutineEditorScreen() {
                   key={option}
                   style={[styles.activityChip, active && styles.activityChipActive]}
                   onPress={() => setActivityType(option)}>
-                  <ThemedText type="small" style={active ? { color: colors.text } : undefined}>
+                  <ThemedText type="small" style={active ? { color: colors.onPrimary } : undefined}>
                     {ACTIVITY_LABELS[option]}
                   </ThemedText>
                 </Pressable>
@@ -132,7 +132,7 @@ export default function CardioRoutineEditorScreen() {
             <View style={[styles.distanceRow, styles.rowDivider]}>
               <Pressable style={styles.goalToggle} onPress={() => setHasTargetDistance((v) => !v)} hitSlop={6}>
                 <View style={[styles.checkCircle, hasTargetDistance ? { backgroundColor: colors.primary } : styles.checkCircleOff]}>
-                  {hasTargetDistance && <SymbolView name="checkmark" size={12} tintColor={colors.text} />}
+                  {hasTargetDistance && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
                 </View>
                 <ThemedText type="small">Target distance</ThemedText>
               </Pressable>
@@ -247,7 +247,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   activityGrid: {
     flexDirection: 'row',

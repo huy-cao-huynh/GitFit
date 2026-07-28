@@ -145,8 +145,8 @@ export function LineChart({
           key={`label-${tick}`}
           x={PADDING.left - 8}
           y={y(tick) + 4}
-          fontSize={11}
-          fontFamily={Fonts.medium}
+          fontSize={12}
+          fontFamily={Fonts.display}
           fill={Colors.textSecondary}
           textAnchor="end">
           {yFormatter(tick)}
@@ -172,8 +172,8 @@ export function LineChart({
       <SvgText
         x={PADDING.left}
         y={height - 4}
-        fontSize={11}
-        fontFamily={Fonts.medium}
+        fontSize={12}
+        fontFamily={Fonts.display}
         fill={Colors.textSecondary}
         textAnchor="start">
         {formatDate(points[0].date)}
@@ -182,8 +182,8 @@ export function LineChart({
         <SvgText
           x={width - PADDING.right}
           y={height - 4}
-          fontSize={11}
-          fontFamily={Fonts.medium}
+          fontSize={12}
+          fontFamily={Fonts.display}
           fill={Colors.textSecondary}
           textAnchor="end">
           {formatDate(points[points.length - 1].date)}
