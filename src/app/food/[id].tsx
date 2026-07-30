@@ -3,10 +3,9 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GradientFill } from '@/components/gradient-fill';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Gradients, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { MEAL_LABELS, MEAL_ORDER, scaleMacros } from '@/lib/store/derive';
 import type { MealType } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
@@ -121,14 +120,13 @@ export default function FoodEntryScreen() {
 
           <View style={styles.macroPreview}>
             <PreviewStat value={scaled.calories} label="cal" />
-            <PreviewStat value={scaled.proteinG} label="protein" />
-            <PreviewStat value={scaled.carbsG} label="carbs" />
-            <PreviewStat value={scaled.fatG} label="fat" />
+            <PreviewStat value={scaled.proteinG} label="protein" unit="g" />
+            <PreviewStat value={scaled.carbsG} label="carbs" unit="g" />
+            <PreviewStat value={scaled.fatG} label="fat" unit="g" />
           </View>
         </ThemedView>
 
         <Pressable style={[styles.primaryButton, !canSave && styles.disabledButton]} disabled={!canSave} onPress={save}>
-          <GradientFill stops={Gradients.cta} />
           <ThemedText type="smallBold" style={styles.primaryButtonText}>
             Save Changes
           </ThemedText>
@@ -144,10 +142,13 @@ export default function FoodEntryScreen() {
   );
 }
 
-function PreviewStat({ value, label }: { value: number; label: string }) {
+function PreviewStat({ value, label, unit }: { value: number; label: string; unit?: string }) {
   return (
     <View style={styles.previewStat}>
-      <ThemedText type="smallBold">{Math.round(value)}</ThemedText>
+      <ThemedText type="smallBold">
+        {Math.round(value)}
+        {unit ?? ''}
+      </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         {label}
       </ThemedText>
@@ -200,8 +201,7 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.two,
   },
@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     borderRadius: Radius.md,
-    overflow: 'hidden',
+    backgroundColor: colors.primary,
     paddingVertical: Spacing.three,
     alignItems: 'center',
   },

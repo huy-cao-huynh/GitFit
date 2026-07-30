@@ -10,7 +10,7 @@ import type { GoalDef, Preferences } from './types';
 export function makeSeedGoals(): GoalDef[] {
   return [
     { id: makeId(), metric: 'workouts', label: 'Workouts', target: 5, unit: 'workouts' },
-    { id: makeId(), metric: 'calories', label: 'Calories', target: 1500, unit: 'cal' },
+    { id: makeId(), metric: 'calories', label: 'Calories Burned', target: 1500, unit: 'cal' },
     { id: makeId(), metric: 'cardio', label: 'Cardio', target: 60, unit: 'min' },
   ];
 }

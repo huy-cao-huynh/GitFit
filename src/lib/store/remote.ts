@@ -29,6 +29,7 @@ import type {
   RecipeIngredient,
   Routine,
   RoutineExercise,
+  RoutineSet,
   Session,
   SetLog,
   StepsEntry,
@@ -42,25 +43,27 @@ import type {
 // Row shapes
 // ---------------------------------------------------------------------------
 
+interface RoutineExerciseSetRow {
+  id: string;
+  routine_exercise_id: string;
+  position: number;
+  is_warmup: boolean;
+  reps: number | null;
+  weight: number | null;
+  duration_sec: number | null;
+}
+
 interface RoutineExerciseRow {
   id: string;
   routine_id: string;
   position: number;
   name: string;
   kind: ExerciseKind;
-  warmup_sets: number | null;
-  warmup_target_reps: number | null;
-  warmup_target_weight: number | null;
-  warmup_target_duration_sec: number | null;
-  warmup_rest_sec: number | null;
-  sets: number;
-  target_reps: number;
-  target_weight: number;
-  target_duration_sec: number | null;
-  target_rest_sec: number | null;
+  rest_sec: number | null;
   last_reps: number | null;
   last_weight: number | null;
   last_duration_sec: number | null;
+  routine_exercise_sets: RoutineExerciseSetRow[];
 }
 
 interface RoutineRow {
@@ -213,6 +216,16 @@ function byPosition<T extends { position: number }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => a.position - b.position);
 }
 
+function mapRoutineSet(row: RoutineExerciseSetRow): RoutineSet {
+  return {
+    id: row.id,
+    isWarmup: row.is_warmup,
+    reps: row.reps ?? undefined,
+    weight: row.weight ?? undefined,
+    durationSec: row.duration_sec ?? undefined,
+  };
+}
+
 function mapRoutineExercise(row: RoutineExerciseRow): RoutineExercise {
   const hasLastTime =
     row.last_reps !== null || row.last_weight !== null || row.last_duration_sec !== null;
@@ -220,16 +233,8 @@ function mapRoutineExercise(row: RoutineExerciseRow): RoutineExercise {
     id: row.id,
     name: row.name,
     kind: row.kind,
-    warmupSets: row.warmup_sets ?? undefined,
-    warmupTargetReps: row.warmup_target_reps ?? undefined,
-    warmupTargetWeight: row.warmup_target_weight ?? undefined,
-    warmupTargetDurationSec: row.warmup_target_duration_sec ?? undefined,
-    warmupRestSec: row.warmup_rest_sec ?? undefined,
-    sets: row.sets,
-    targetReps: row.target_reps,
-    targetWeight: row.target_weight,
-    targetDurationSec: row.target_duration_sec ?? undefined,
-    targetRestSec: row.target_rest_sec ?? undefined,
+    sets: byPosition(row.routine_exercise_sets).map(mapRoutineSet),
+    restSec: row.rest_sec ?? undefined,
     lastTime: hasLastTime
       ? {
           reps: row.last_reps ?? undefined,
@@ -449,7 +454,7 @@ export async function fetchStoreData(): Promise<StoreData> {
     supabase.from('profiles').select('unit_system').maybeSingle<{ unit_system: UnitSystem }>(),
     supabase
       .from('routines')
-      .select('*, routine_exercises(*)')
+      .select('*, routine_exercises(*, routine_exercise_sets(*))')
       .order('created_at')
       .returns<RoutineRow[]>(),
     supabase
@@ -532,19 +537,22 @@ function routineExerciseToRow(routineId: string, exercise: RoutineExercise, posi
     position,
     name: exercise.name,
     kind: exercise.kind ?? 'reps',
-    warmup_sets: exercise.warmupSets ?? 0,
-    warmup_target_reps: exercise.warmupTargetReps ?? null,
-    warmup_target_weight: exercise.warmupTargetWeight ?? null,
-    warmup_target_duration_sec: exercise.warmupTargetDurationSec ?? null,
-    warmup_rest_sec: exercise.warmupRestSec ?? null,
-    sets: exercise.sets,
-    target_reps: exercise.targetReps,
-    target_weight: exercise.targetWeight,
-    target_duration_sec: exercise.targetDurationSec ?? null,
-    target_rest_sec: exercise.targetRestSec ?? null,
+    rest_sec: exercise.restSec ?? null,
     last_reps: exercise.lastTime?.reps ?? null,
     last_weight: exercise.lastTime?.weight ?? null,
     last_duration_sec: exercise.lastTime?.durationSec ?? null,
+  };
+}
+
+function routineExerciseSetToRow(routineExerciseId: string, set: RoutineSet, position: number) {
+  return {
+    id: set.id,
+    routine_exercise_id: routineExerciseId,
+    position,
+    is_warmup: set.isWarmup,
+    reps: set.reps ?? null,
+    weight: set.weight ?? null,
+    duration_sec: set.durationSec ?? null,
   };
 }
 
@@ -555,6 +563,13 @@ async function insertRoutineExercises(routine: Routine): Promise<void> {
   );
   const { error } = await supabase.from('routine_exercises').insert(rows);
   throwIfError(error);
+
+  const setRows = routine.exercises.flatMap((exercise) =>
+    exercise.sets.map((set, setIndex) => routineExerciseSetToRow(exercise.id, set, setIndex)),
+  );
+  if (setRows.length === 0) return;
+  const { error: setsError } = await supabase.from('routine_exercise_sets').insert(setRows);
+  throwIfError(setsError);
 }
 
 export async function insertRoutine(routine: Routine): Promise<void> {

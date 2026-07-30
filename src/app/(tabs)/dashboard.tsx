@@ -2,28 +2,28 @@ import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
 
-import { ActivityRings } from '@/components/activity-rings';
-import { AnimatedNumber } from '@/components/animated-number';
-import { Chevron } from '@/components/chevron';
-import { GradientFill } from '@/components/gradient-fill';
+import { DailyGoalsCard } from '@/components/daily-goals-card';
+import { GoalDeck } from '@/components/goal-deck';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { TodayWorkoutCard } from '@/components/today-workout-card';
 import { WaterBottle } from '@/components/water-bottle';
-import { BottomTabInset, Colors, Gradients, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
-import { currentGoalValue, scheduledRoutineTasks, todayKey, todayWaterOunces } from '@/lib/store/derive';
+import { WeighInCard } from '@/components/weigh-in-card';
+import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
+import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
+import { dashboardMetrics, scheduledRoutineTasks, todayKey, todayWaterOunces, weekdayForDate } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import type { GoalDef } from '@/lib/store/types';
-import { fromDisplayVolume, toDisplayVolume, volumeUnitLabel } from '@/lib/units';
+import { fromDisplayVolume, fromDisplayWeight, toDisplayVolume, volumeUnitLabel } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 const WATER_QUICK_ADD_IMPERIAL = 16;
 const WATER_QUICK_ADD_METRIC = 500;
+const BENTO_HEIGHT = 208;
 
 export default function DashboardScreen() {
   const { session } = useAuth();
@@ -36,228 +36,144 @@ export default function DashboardScreen() {
     checkoffDefs,
     checkoffLog,
     waterEntries,
+    foodLogs,
+    nutritionGoals,
+    steps,
+    bodyweight,
     addWaterEntry,
+    addBodyweight,
     toggleCheckoff,
     preferences,
   } = useStore();
   const metadata = session?.user.user_metadata ?? {};
   const name = (metadata.full_name as string | undefined)?.trim() || session?.user.email?.split('@')[0] || 'there';
+  const scrollRef = useResetScrollOnFocus<ScrollView>();
 
   const unitSystem = preferences.unitSystem;
   const today = todayKey();
   const doneToday = checkoffLog[today] ?? [];
   const scheduledTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, today);
 
+  const metrics = dashboardMetrics(
+    goals,
+    sessions,
+    cardioSessions,
+    waterEntries,
+    goalEntries,
+    foodLogs,
+    nutritionGoals,
+    today,
+    steps,
+  );
+
   const waterGoal = goals.find((goal) => goal.metric === 'water');
   const todayWater = todayWaterOunces(waterEntries);
   const dailyWaterTarget = waterGoal ? Math.max(1, Math.round(waterGoal.target / 7)) : 0;
-
-  const todayTotal = scheduledTasks.length + checkoffDefs.length;
-  const todayDone = scheduledTasks.filter((task) => task.completed).length + doneToday.length;
 
   const addWater = (displayAmount: number) => {
     addWaterEntry({ id: makeId(), date: today, ounces: Math.round(fromDisplayVolume(displayAmount, unitSystem)) });
   };
 
+  const weighInGoal = goals.find((goal) => goal.metric === 'bodyweight');
+  const showWeighInToday = !!weighInGoal && weekdayForDate(new Date()) === weighInGoal.target;
+  const weightForToday = bodyweight.find((entry) => entry.date === today);
+  const saveTodayWeight = (displayValue: number) => {
+    addBodyweight({ date: today, weight: fromDisplayWeight(displayValue, unitSystem) });
+  };
+
+  const quickAdd = unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL;
+
   return (
     <TabFadeView style={styles.container}>
       <ScreenBackground>
         <SafeAreaView edges={['top']} style={styles.safeArea}>
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <ThemedText type="display">
-              Hey,{' '}
-              <ThemedText type="displayItalic" themeColor="primaryLight">
-                {name}
-              </ThemedText>
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              Ready to train?
-            </ThemedText>
-          </View>
-
-          <View style={styles.sectionHeader}>
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-              TODAY
-            </ThemedText>
-            <Pressable hitSlop={8} onPress={() => router.push('/logging')}>
-              <ThemedText type="small" style={{ color: colors.primaryLight }}>
-                Edit
-              </ThemedText>
-            </Pressable>
-          </View>
-
-          <ThemedView type="surface" style={styles.todaySection}>
-            <View style={styles.cardAccent} pointerEvents="none">
-              <GradientFill stops={Gradients.cardAccent} />
-            </View>
-
-            {scheduledTasks.map((task) => {
-              const path =
-                task.routine.category === 'cardio'
-                  ? { pathname: '/cardio/[id]' as const, params: { id: task.routine.id } }
-                  : { pathname: '/workout/[id]' as const, params: { id: task.routine.id } };
-              return (
-                <Pressable
-                  key={task.routine.id}
-                  style={styles.todayRow}
-                  onPress={() => router.push(path)}
-                  disabled={task.completed}>
-                  <View style={[styles.checkCircle, task.completed ? styles.checkCircleDone : styles.checkCircleTodo]}>
-                    {task.completed && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
-                  </View>
-                  <View style={styles.todayText}>
-                    <ThemedText type="smallBold">{task.routine.name}</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {task.completed ? 'Completed today' : `${task.routine.durationMinutes} min · ${task.routine.level}`}
-                    </ThemedText>
-                  </View>
-                  {!task.completed && <Chevron color={colors.textSecondary} />}
-                </Pressable>
-              );
-            })}
-
-            {scheduledTasks.length === 0 && checkoffDefs.length === 0 && (
-              <View style={styles.todayRow}>
-                <View style={[styles.todayIcon, { backgroundColor: colors.primaryTint }]}>
-                  <SymbolView name="moon.zzz" size={15} tintColor={colors.primaryLight} />
-                </View>
-                <View style={styles.todayText}>
-                  <ThemedText type="smallBold">Rest day</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    Recover — nothing planned
-                  </ThemedText>
-                </View>
-              </View>
-            )}
-
-            {checkoffDefs.map((def) => {
-              const done = doneToday.includes(def.id);
-              return (
-                <Pressable key={def.id} style={styles.todayRow} onPress={() => toggleCheckoff(today, def.id)}>
-                  <View
-                    style={[
-                      styles.checkCircle,
-                      done
-                        ? { backgroundColor: colors.primary }
-                        : { borderWidth: 2, borderColor: colors.border },
-                    ]}>
-                    {done && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
-                  </View>
-                  <ThemedText type="small" themeColor={done ? 'textSecondary' : 'text'} style={styles.checkLabel}>
-                    {def.name}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </ThemedView>
-
-          <View style={styles.bentoRow}>
-            <ThemedView type="surface" style={styles.ringsCard}>
-              <Pressable onPress={() => router.navigate('/logging')}>
-                <ActivityRings
-                  animated
-                  size={160}
-                  strokeWidth={13}
-                  gap={5}
-                  rings={goals.map((goal, index) => ({
-                    progress: currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries) / goal.target,
-                    color: RingColors[index % RingColors.length],
-                    trackColor: colors.border,
-                  }))}
-                />
-              </Pressable>
-            </ThemedView>
-
-            <View style={styles.bentoColumn}>
-              {waterGoal && (
-                <ThemedView type="surface" style={styles.miniCard}>
-                  <WaterBottle progress={todayWater / (dailyWaterTarget || 1)} size={48} />
-                  <ThemedText type="smallBold" numberOfLines={1}>
-                    {toDisplayVolume(todayWater, unitSystem)}/{toDisplayVolume(dailyWaterTarget, unitSystem)}{' '}
-                    {volumeUnitLabel(unitSystem)}
-                  </ThemedText>
-                  <Pressable
-                    style={styles.waterButton}
-                    onPress={() => addWater(unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL)}>
-                    <ThemedText type="small" numberOfLines={1} style={{ color: colors.primaryLight }}>
-                      +{unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL}{' '}
-                      {volumeUnitLabel(unitSystem)}
-                    </ThemedText>
-                  </Pressable>
-                </ThemedView>
-              )}
-
-              <ThemedView type="surface" style={styles.miniCard}>
-                <AnimatedNumber value={todayDone} suffix={`/${todayTotal}`} />
-                <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                  Done today
+          <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.header}>
+              <ThemedText type="display">
+                Hey,{' '}
+                <ThemedText type="displayItalic" themeColor="primaryLight">
+                  {name}
                 </ThemedText>
-              </ThemedView>
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Ready to train?
+              </ThemedText>
             </View>
-          </View>
 
-          {goals.length > 0 && (
-            <View style={styles.ringsLegend}>
-              {goals.map((goal, index) => (
-                <LegendStat
-                  key={goal.id}
-                  color={RingColors[index % RingColors.length]}
-                  goal={goal}
-                  value={currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries)}
-                  unitSystem={unitSystem}
+            <GoalDeck metrics={metrics} unitSystem={unitSystem} />
+
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <ThemedText type="label" style={styles.sectionLabel}>
+                  Daily Goals
+                </ThemedText>
+                <Pressable onPress={() => router.navigate('/logging')} hitSlop={8}>
+                  <ThemedText type="small" themeColor="primaryLight">
+                    Edit
+                  </ThemedText>
+                </Pressable>
+              </View>
+
+              <View style={styles.bento}>
+                {waterGoal ? (
+                  <View style={styles.waterCard}>
+                    <ThemedText type="caption" themeColor="textSecondary">
+                      WATER
+                    </ThemedText>
+                    <WaterBottle progress={dailyWaterTarget > 0 ? todayWater / dailyWaterTarget : 0} size={44} />
+                    <ThemedText type="statInline">
+                      {toDisplayVolume(todayWater, unitSystem)}
+                      <ThemedText type="small" themeColor="textSecondary">
+                        /{toDisplayVolume(dailyWaterTarget, unitSystem)} {volumeUnitLabel(unitSystem)}
+                      </ThemedText>
+                    </ThemedText>
+                    <Pressable
+                      style={({ pressed }) => [styles.waterAdd, pressed && styles.waterAddPressed]}
+                      onPress={() => addWater(quickAdd)}>
+                      <ThemedText type="caption" themeColor="onPrimary">
+                        +{quickAdd} {volumeUnitLabel(unitSystem)}
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                <DailyGoalsCard
+                  defs={checkoffDefs}
+                  doneToday={doneToday}
+                  checkoffLog={checkoffLog}
+                  onToggle={(defId) => toggleCheckoff(today, defId)}
                 />
-              ))}
+              </View>
+
+              {showWeighInToday && (
+                <WeighInCard loggedToday={weightForToday} unitSystem={unitSystem} onSave={saveTodayWeight} />
+              )}
             </View>
-          )}
 
-          <Pressable
-            style={({ pressed }) => [styles.startButton, pressed && styles.startButtonPressed]}
-            onPress={() => router.push('/workout/choose')}>
-            <GradientFill stops={Gradients.ctaHero} angle={120} />
-            <Svg width={14} height={16} viewBox="0 0 14 16">
-              <Path d="M0 0l14 8-14 8z" fill={colors.onPrimary} />
-            </Svg>
-            <ThemedText type="button" style={styles.startButtonText}>
-              Start Workout
-            </ThemedText>
-          </Pressable>
-
+            <View style={styles.section}>
+              <ThemedText type="label" style={styles.sectionLabel}>
+                Today&apos;s Workout
+              </ThemedText>
+              <TodayWorkoutCard tasks={scheduledTasks} unitSystem={unitSystem} />
+              {/* Deliberately separate from the card's play button: this one
+                  starts something unscheduled, which is the only way in when
+                  today is a rest day. */}
+              <Pressable
+                style={({ pressed }) => [styles.newWorkoutButton, pressed && styles.newWorkoutButtonPressed]}
+                onPress={() => {
+                  haptics.impact();
+                  router.push('/workout/choose');
+                }}>
+                <SymbolView name="plus" size={16} tintColor={colors.onPrimary} />
+                <ThemedText type="button" themeColor="onPrimary">
+                  New Workout
+                </ThemedText>
+              </Pressable>
+            </View>
           </ScrollView>
         </SafeAreaView>
       </ScreenBackground>
     </TabFadeView>
-  );
-}
-
-function LegendStat({
-  color,
-  goal,
-  value,
-  unitSystem,
-}: {
-  color: string;
-  goal: GoalDef;
-  value: number;
-  unitSystem: 'imperial' | 'metric';
-}) {
-  const isVolume = goal.metric === 'water';
-  const displayValue = isVolume ? toDisplayVolume(value, unitSystem) : Math.round(value);
-  const displayTarget = isVolume ? toDisplayVolume(goal.target, unitSystem) : goal.target;
-  const unitLabel = isVolume ? volumeUnitLabel(unitSystem) : goal.unit || goal.label;
-
-  return (
-    <View style={styles.legendStat}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <ThemedText type="small">
-        <ThemedText type="statInline">{displayValue}</ThemedText>
-        <ThemedText type="statInline" themeColor="textSecondary">
-          /{displayTarget}
-        </ThemedText>
-        {/* The unit is what names the number — it stays full contrast. */}
-        <ThemedText type="small"> {unitLabel}</ThemedText>
-      </ThemedText>
-    </View>
   );
 }
 
@@ -267,18 +183,14 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    alignItems: 'center',
   },
-  // ScrollView needs an explicit width here — `alignItems: 'center'` above means it otherwise
-  // sizes to its own content instead of the viewport, so any row that's naturally wider than the
-  // screen (long text, an unshrinkable button, …) silently pushes the whole page wider than the phone.
   scroll: {
     flex: 1,
-    width: '100%',
   },
   content: {
     width: '100%',
     maxWidth: MaxContentWidth,
+    alignSelf: 'center',
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
     paddingBottom: BottomTabInset,
@@ -287,134 +199,54 @@ const styles = StyleSheet.create({
   header: {
     gap: Spacing.one,
   },
-  bentoRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
+  section: {
     gap: Spacing.two,
-  },
-  ringsCard: {
-    flex: 1.6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: Spacing.three,
-  },
-  bentoColumn: {
-    flex: 1,
-    gap: Spacing.two,
-  },
-  miniCard: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: Spacing.two,
-  },
-  ringsLegend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  legendStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.one,
-    borderRadius: Radius.full,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  legendDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-  },
-  waterButton: {
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    borderRadius: Radius.sm,
-    backgroundColor: colors.surfaceElevated,
-  },
-  startButton: {
-    borderRadius: Radius.md,
-    overflow: 'hidden',
-    paddingVertical: Spacing.three,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-  },
-  startButtonPressed: {
-    opacity: 0.85,
-  },
-  startButtonText: {
-    color: colors.onPrimary,
-    fontSize: 20,
-    lineHeight: 28,
-  },
-  sectionLabel: {
-    textTransform: 'uppercase',
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  todaySection: {
-    gap: Spacing.three,
+  sectionLabel: {
+    textTransform: 'uppercase',
+  },
+  bento: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    // Fixed, not capped: DailyGoalsCard is `flex: 1` and has no intrinsic
+    // height of its own — it was only getting a height because the water
+    // card's own content sized the row. Without a water goal (no water card),
+    // an unbounded row collapses that flexed child to zero height. A fixed
+    // height gives both children something to stretch to; a long goal list
+    // still scrolls inside its card rather than stretching the row.
+    height: BENTO_HEIGHT,
+  },
+  waterCard: {
+    alignItems: 'center',
+    gap: Spacing.two,
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
-    overflow: 'hidden',
   },
-  cardAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 56,
+  waterAdd: {
+    borderRadius: Radius.sm,
+    backgroundColor: colors.primary,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
   },
-  todayRow: {
+  waterAddPressed: {
+    backgroundColor: colors.primaryDark,
+  },
+  newWorkoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
-  },
-  todayIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
     justifyContent: 'center',
-  },
-  todayText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  checkCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkCircleDone: {
+    gap: Spacing.two,
+    borderRadius: Radius.md,
     backgroundColor: colors.primary,
+    paddingVertical: Spacing.three,
   },
-  checkCircleTodo: {
-    borderWidth: 2,
-    borderColor: colors.textMuted,
-  },
-  checkLabel: {
-    flex: 1,
+  newWorkoutButtonPressed: {
+    backgroundColor: colors.primaryDark,
   },
 });

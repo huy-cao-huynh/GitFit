@@ -4,6 +4,7 @@
  */
 
 import type {
+  BodyweightEntry,
   CardioActivityType,
   CardioSession,
   CheckoffDef,
@@ -11,17 +12,24 @@ import type {
   FoodLogEntry,
   GoalDef,
   GoalEntry,
+  GoalMetric,
   Macros,
   MealType,
   MeasurementEntry,
   ProgressPoint,
   Recipe,
   Routine,
+  RoutineExercise,
   Session,
   SetLog,
+  StepsEntry,
+  UnitSystem,
   WaterEntry,
   Weekday,
 } from './types';
+import { formatDuration } from '@/lib/format';
+import { muscleGroupsFor } from '@/lib/muscles';
+import { formatWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
 
 /** Rough calories/minute per activity — same "placeholder until HealthKit" spirit as the strength session heuristic. */
 const CARDIO_CALORIES_PER_MINUTE: Record<CardioActivityType, number> = {
@@ -36,6 +44,21 @@ const CARDIO_CALORIES_PER_MINUTE: Record<CardioActivityType, number> = {
 
 export function estimateCardioCalories(activityType: CardioActivityType, minutes: number): number {
   return Math.round(minutes * CARDIO_CALORIES_PER_MINUTE[activityType]);
+}
+
+/** Same placeholder-until-HealthKit heuristic, for strength sessions. */
+export const STRENGTH_CALORIES_PER_MINUTE = 8;
+
+/**
+ * Estimated burn for a routine before it's been run — what the dashboard
+ * previews. Uses the same constants the session screens write on save, so the
+ * preview and the logged number agree.
+ */
+export function estimateRoutineCalories(routine: Routine): number {
+  if (routine.category === 'cardio') {
+    return estimateCardioCalories(routine.activityType ?? 'other', routine.durationMinutes);
+  }
+  return routine.durationMinutes * STRENGTH_CALORIES_PER_MINUTE;
 }
 
 export function toDateKey(date: Date): string {
@@ -58,10 +81,13 @@ export const WEEKDAY_OPTIONS: { value: Weekday; short: string; label: string }[]
   { value: 7, short: 'S', label: 'Sunday' },
 ];
 
-const CALENDAR_WEEKDAY_OPTIONS: { value: Weekday; short: string; label: string }[] = [
+export const CALENDAR_WEEKDAY_OPTIONS: { value: Weekday; short: string; label: string }[] = [
   { value: 7, short: 'S', label: 'Sunday' },
   ...WEEKDAY_OPTIONS.slice(0, 6),
 ];
+
+/** Sunday-first 3-letter weekday abbreviations for the calendar strip, index-aligned with `CALENDAR_WEEKDAY_OPTIONS`. */
+const CALENDAR_WEEKDAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 function dateFromKey(dateKey: string): Date {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -73,7 +99,7 @@ export function weekdayForDate(date: Date): Weekday {
   return (day === 0 ? 7 : day) as Weekday;
 }
 
-function weekStartKey(): string {
+export function weekStartKey(): string {
   const today = new Date();
   const weekStart = new Date(today);
   weekStart.setDate(today.getDate() - today.getDay());
@@ -128,6 +154,7 @@ export interface UnscheduledCompletedWorkout {
   name: string;
   category: 'strength' | 'cardio';
   minutes: number;
+  calories: number;
 }
 
 /**
@@ -150,6 +177,7 @@ export function unscheduledCompletedWorkouts(
       name: session.routineName,
       category: 'strength' as const,
       minutes: session.durationMinutes,
+      calories: session.calories ?? Math.round(session.durationMinutes * STRENGTH_CALORIES_PER_MINUTE),
     }));
   const cardio = cardioSessions
     .filter((session) => session.date === dateKey && !(session.routineId && scheduledIds.has(session.routineId)))
@@ -158,6 +186,7 @@ export function unscheduledCompletedWorkouts(
       name: session.name,
       category: 'cardio' as const,
       minutes: session.minutes,
+      calories: session.calories ?? estimateCardioCalories(session.activityType, session.minutes),
     }));
   return [...strength, ...cardio];
 }
@@ -183,7 +212,7 @@ export function calendarWeekDays(
       cardioSessions.filter((session) => session.date === dateKey).length;
     return {
       date: dateKey,
-      label: option.short,
+      label: CALENDAR_WEEKDAY_ABBR[index],
       dayNumber: date.getDate(),
       isToday: dateKey === todaysKey,
       scheduledCount,
@@ -192,12 +221,145 @@ export function calendarWeekDays(
   });
 }
 
+export interface CheckoffDay {
+  date: string;
+  label: string;
+  isToday: boolean;
+  done: boolean;
+}
+
+/**
+ * A single check-off definition's current week, Sunday-anchored to line up with
+ * `calendarWeekDays` and the weekly goal window. Reads straight out of
+ * `checkoffLog`, so the streak strip costs no extra storage or writes.
+ */
+export function checkoffWeek(
+  checkoffLog: CheckoffLog,
+  defId: string,
+  anchorDate = new Date(),
+): CheckoffDay[] {
+  const sunday = new Date(anchorDate);
+  const weekday = weekdayForDate(anchorDate);
+  sunday.setDate(anchorDate.getDate() - (weekday === 7 ? 0 : weekday));
+  const todaysKey = todayKey();
+
+  return CALENDAR_WEEKDAY_OPTIONS.map((option, index) => {
+    const date = new Date(sunday);
+    date.setDate(sunday.getDate() + index);
+    const dateKey = toDateKey(date);
+    return {
+      date: dateKey,
+      label: option.short,
+      isToday: dateKey === todaysKey,
+      done: (checkoffLog[dateKey] ?? []).includes(defId),
+    };
+  });
+}
+
+/**
+ * Consecutive days on which *every* current check-off goal was completed.
+ * Today only breaks the streak once it's over, so an unfinished today counts
+ * back from yesterday rather than resetting to zero mid-morning.
+ *
+ * Note this measures today's goal list against history — a goal added today
+ * can shorten the streak, because there's no record of it on earlier days.
+ */
+export function allGoalsStreak(defs: CheckoffDef[], checkoffLog: CheckoffLog, anchorDate = new Date()): number {
+  if (defs.length === 0) return 0;
+
+  const allDoneOn = (dateKey: string) => {
+    const done = checkoffLog[dateKey] ?? [];
+    return defs.every((def) => done.includes(def.id));
+  };
+
+  const cursor = new Date(anchorDate);
+  if (!allDoneOn(toDateKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+
+  let streak = 0;
+  while (allDoneOn(toDateKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
 export function routineScheduleLabel(routine: Routine): string {
   if (!routine.scheduledDays || routine.scheduledDays.length === 0) return 'No schedule';
   if (routine.scheduledDays.length === 7) return 'Every day';
   return WEEKDAY_OPTIONS.filter((option) => routine.scheduledDays?.includes(option.value))
     .map((option) => option.short)
     .join(', ');
+}
+
+/**
+ * One condensed summary line for a routine exercise's sets, e.g.
+ * "3 sets · 135–175 lbs × 8" (pyramid) or "3 sets · 45s" (time-kind). Shared
+ * by the routine editor's condensed exercise rows, the today-workout card,
+ * and the live session screen so they never drift out of sync.
+ */
+export function describeExerciseSets(exercise: RoutineExercise, unitSystem: UnitSystem): string {
+  const working = exercise.sets.filter((set) => !set.isWarmup);
+  const warmupCount = exercise.sets.length - working.length;
+  const warmupLabel = warmupCount > 0 ? `${warmupCount} warm-up + ` : '';
+
+  if (working.length === 0) {
+    return warmupCount > 0 ? `${warmupCount} warm-up set${warmupCount === 1 ? '' : 's'}` : 'No sets yet';
+  }
+
+  const countLabel = `${working.length} set${working.length === 1 ? '' : 's'}`;
+
+  if ((exercise.kind ?? 'reps') === 'time') {
+    const durations = working.map((set) => set.durationSec ?? 0);
+    const min = Math.min(...durations);
+    const max = Math.max(...durations);
+    const durationLabel = min === max ? formatDuration(min) : `${formatDuration(min)}–${formatDuration(max)}`;
+    return `${warmupLabel}${countLabel} · ${durationLabel}`;
+  }
+
+  const weights = working.map((set) => set.weight ?? 0);
+  const reps = working.map((set) => set.reps ?? 0);
+  const minWeight = Math.min(...weights);
+  const maxWeight = Math.max(...weights);
+  const minReps = Math.min(...reps);
+  const maxReps = Math.max(...reps);
+  const repsLabel = minReps === maxReps ? `${minReps}` : `${minReps}-${maxReps}`;
+  const weightLabel =
+    maxWeight > 0
+      ? minWeight === maxWeight
+        ? formatWeight(minWeight, unitSystem)
+        : `${toDisplayWeight(minWeight, unitSystem)}–${toDisplayWeight(maxWeight, unitSystem)} ${weightUnitLabel(unitSystem)}`
+      : '';
+
+  return `${warmupLabel}${countLabel} · ${weightLabel ? `${weightLabel} × ` : ''}${repsLabel} reps`;
+}
+
+/** The fixed chip set for the Workouts main page's "trained this week" coverage bar — the catch-all `muscleGroupsFor` groups (Full body, Cardio) are excluded since they don't map to a single body part. */
+export const MUSCLE_COVERAGE_GROUPS = [
+  'Chest',
+  'Back',
+  'Shoulders',
+  'Biceps',
+  'Triceps',
+  'Quads',
+  'Hamstrings',
+  'Glutes',
+  'Calves',
+  'Core',
+] as const;
+
+/** Which of `MUSCLE_COVERAGE_GROUPS` have been hit by a logged strength session so far this week (Sunday-anchored). */
+export function muscleCoverageThisWeek(sessions: Session[]): Set<string> {
+  const startKey = weekStartKey();
+  const hit = new Set<string>();
+  for (const session of sessions) {
+    if (session.date < startKey) continue;
+    for (const exercise of session.exercises) {
+      for (const group of muscleGroupsFor(exercise.name)) {
+        hit.add(group);
+      }
+    }
+  }
+  return hit;
 }
 
 export type DayStatus = 'none' | 'partial' | 'all';
@@ -246,6 +408,8 @@ export function currentGoalValue(
   cardioSessions: CardioSession[],
   waterEntries: WaterEntry[],
   goalEntries: GoalEntry[] = [],
+  steps: StepsEntry[] = [],
+  bodyweight: BodyweightEntry[] = [],
 ): number {
   const startKey = weekStartKey();
   switch (goal.metric) {
@@ -264,6 +428,10 @@ export function currentGoalValue(
       return cardioSessions.filter((s) => s.date >= startKey).reduce((sum, s) => sum + s.minutes, 0);
     case 'water':
       return waterEntries.filter((e) => e.date >= startKey).reduce((sum, e) => sum + e.ounces, 0);
+    case 'steps':
+      return steps.filter((s) => s.date >= startKey).reduce((sum, s) => sum + s.steps, 0);
+    case 'bodyweight':
+      return bodyweight.filter((e) => e.date >= startKey).length;
     case 'manual':
       return goalEntries
         .filter((e) => e.goalId === goal.id && e.date >= startKey)
@@ -275,6 +443,101 @@ export function currentGoalValue(
 export function todayWaterOunces(waterEntries: WaterEntry[]): number {
   const key = todayKey();
   return waterEntries.filter((e) => e.date === key).reduce((sum, e) => sum + e.ounces, 0);
+}
+
+/** Today's logged steps, independent of the weekly ring math. */
+export function todayStepsCount(steps: StepsEntry[]): number {
+  const key = todayKey();
+  return steps.filter((s) => s.date === key).reduce((sum, s) => sum + s.steps, 0);
+}
+
+/** One card in the dashboard's swipeable metric deck. */
+export interface DashboardMetric {
+  key: string;
+  /** Chip text beside the icon ("Calories Eaten"). */
+  label: string;
+  /** Serif headline ("Your Daily Calories"). */
+  title: string;
+  metric: GoalMetric | 'intake';
+  value: number;
+  target: number;
+  unit: string;
+  period: 'today' | 'this week';
+  /** Water is stored in canonical ounces and needs converting for display. */
+  isVolume: boolean;
+}
+
+/**
+ * Deck order. Calories eaten opens the deck (it's the metric you touch most
+ * often), and the calories-burned goal is deliberately placed away from it so
+ * two similarly-named cards never sit next to each other.
+ */
+const DECK_ORDER: (GoalMetric | 'intake')[] = ['intake', 'steps', 'workouts', 'cardio', 'water', 'calories'];
+
+/**
+ * The dashboard metric deck: every goal, plus a calories-eaten card sourced
+ * from the Nutrition tab. Each metric reports over the period that actually
+ * makes sense for it — intake and water are daily, everything else is the
+ * weekly goal window.
+ */
+export function dashboardMetrics(
+  goals: GoalDef[],
+  sessions: Session[],
+  cardioSessions: CardioSession[],
+  waterEntries: WaterEntry[],
+  goalEntries: GoalEntry[],
+  foodLogs: FoodLogEntry[],
+  nutritionGoals: Macros | null,
+  dateKey: string,
+  steps: StepsEntry[] = [],
+): DashboardMetric[] {
+  const cards: DashboardMetric[] = [];
+
+  // Falls back to the shared default rather than dropping the card, so the
+  // deck always agrees with the target the Nutrition tab displays.
+  const intakeTarget = (nutritionGoals ?? DEFAULT_NUTRITION_GOALS).calories;
+  if (intakeTarget > 0) {
+    cards.push({
+      key: 'intake',
+      label: 'Calories Eaten',
+      title: 'Your Daily Calories Eaten',
+      metric: 'intake',
+      value: Math.round(nutritionForDate(foodLogs, dateKey).totals.calories),
+      target: intakeTarget,
+      unit: 'kcal',
+      period: 'today',
+      isVolume: false,
+    });
+  }
+
+  for (const goal of goals) {
+    // Manual check-ins have no natural chart; bodyweight goals target a
+    // weekday, not a count, so they don't fit the deck's progress-ring shape.
+    if (goal.metric === 'manual' || goal.metric === 'bodyweight') continue;
+    // "Calories" alone sits next to the intake card and reads ambiguously, so
+    // the default label is spelled out. A renamed goal is left alone.
+    const label = goal.metric === 'calories' && goal.label === 'Calories' ? 'Calories Burned' : goal.label;
+    const isSteps = goal.metric === 'steps';
+    cards.push({
+      key: goal.id,
+      label,
+      title: `Your ${isSteps ? 'Daily' : 'Weekly'} ${label}`,
+      metric: goal.metric,
+      // Steps reads daily, like intake — there is still no daily steps target
+      // in the data model, so the weekly one is divided down.
+      value: isSteps
+        ? todayStepsCount(steps)
+        : currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries, steps),
+      target: isSteps ? Math.max(1, Math.round(goal.target / 7)) : goal.target,
+      // Both calorie cards read in kcal so the deck doesn't switch units
+      // between "eaten" and "burned".
+      unit: goal.metric === 'calories' ? 'kcal' : goal.unit || goal.label,
+      period: isSteps ? 'today' : 'this week',
+      isVolume: goal.metric === 'water',
+    });
+  }
+
+  return cards.sort((a, b) => DECK_ORDER.indexOf(a.metric) - DECK_ORDER.indexOf(b.metric));
 }
 
 /** Unique exercise names across sessions, most-logged first. */
@@ -424,6 +687,30 @@ export function exercisePR(
   return best;
 }
 
+/** Most recent cardio session logged against this routine. Relies on the caller's `cardioSessions` being sorted most-recent-first, same contract as `lastExercisePerformance`. */
+export function lastCardioPerformance(
+  cardioSessions: CardioSession[],
+  routineId: string,
+): { date: string; minutes: number; distanceMiles?: number } | null {
+  const match = cardioSessions.find((session) => session.routineId === routineId);
+  return match ? { date: match.date, minutes: match.minutes, distanceMiles: match.distanceMiles } : null;
+}
+
+/** Longest distance ever logged for this routine, with the date it happened. Mirrors `exercisePR`'s shape. */
+export function cardioRoutinePR(
+  cardioSessions: CardioSession[],
+  routineId: string,
+): { distanceMiles: number; date: string } | null {
+  let best: { distanceMiles: number; date: string } | null = null;
+  for (const session of cardioSessions) {
+    if (session.routineId !== routineId || !session.distanceMiles) continue;
+    if (!best || session.distanceMiles > best.distanceMiles) {
+      best = { distanceMiles: session.distanceMiles, date: session.date };
+    }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------------------
 // Nutrition
 // ---------------------------------------------------------------------------
@@ -438,6 +725,13 @@ export const MEAL_LABELS: Record<MealType, string> = {
 };
 
 export const EMPTY_MACROS: Macros = { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 };
+
+/**
+ * Daily intake targets shown until the user sets their own. Shared so the
+ * Nutrition tab and the dashboard's intake card never disagree about what
+ * today's calorie target is.
+ */
+export const DEFAULT_NUTRITION_GOALS: Macros = { calories: 2000, proteinG: 140, carbsG: 220, fatG: 65 };
 
 export function addMacros(a: Macros, b: Macros): Macros {
   return {
@@ -470,6 +764,48 @@ export function nutritionForDate(
     totals = addMacros(totals, entry);
   }
   return { totals, byMeal };
+}
+
+/** A distinct previously-logged food, normalized back to per-100g so it can feed the same amount math as a fresh search result. */
+export interface RecentFood {
+  name: string;
+  brand?: string;
+  /** Amount logged last time, for defaulting the portion picker. */
+  grams: number;
+  caloriesPer100g: number;
+  proteinPer100g: number;
+  carbsPer100g: number;
+  fatPer100g: number;
+}
+
+/**
+ * Distinct foods the user has logged before (by name+brand), most recent
+ * first, for quick re-logging. Relies on `foodLogs` already being
+ * newest-first (remote fetch orders by date desc; `addFoodLog` prepends).
+ * Serving-based entries (recipes, no `grams`) are skipped — there's no
+ * per-gram rate to normalize them to.
+ */
+export function recentFoods(foodLogs: FoodLogEntry[], limit = 6): RecentFood[] {
+  const seen = new Set<string>();
+  const out: RecentFood[] = [];
+  for (const entry of foodLogs) {
+    if (entry.grams === undefined || entry.grams <= 0) continue;
+    const key = `${entry.name.toLowerCase()}|${entry.brand?.toLowerCase() ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const factor = 100 / entry.grams;
+    out.push({
+      name: entry.name,
+      brand: entry.brand,
+      grams: entry.grams,
+      caloriesPer100g: entry.calories * factor,
+      proteinPer100g: entry.proteinG * factor,
+      carbsPer100g: entry.carbsG * factor,
+      fatPer100g: entry.fatG * factor,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /** Whole-recipe macro totals (sum of ingredients). */

@@ -76,7 +76,7 @@ export default function ChooseWorkoutScreen() {
             </View>
           }
           renderSectionHeader={({ section }) => (
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" style={styles.sectionLabel}>
               {section.title.toUpperCase()}
             </ThemedText>
           )}
@@ -100,12 +100,18 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
       }`
     : `${routine.exercises.length} exercises · ${routine.durationMinutes} min`;
 
-  const goToPlay = () =>
+  const goToPlay = () => {
+    // Pop the "Choose a Workout" modal first so the session screen pushes
+    // fresh from the tabs stack instead of nesting inside the modal's own
+    // native stack — otherwise it inherits the modal's swipe-down-to-dismiss
+    // gesture, letting a stray swipe cancel an in-progress workout.
+    router.back();
     router.push(
       isCardio
         ? { pathname: '/cardio/[id]', params: { id: routine.id } }
         : { pathname: '/workout/[id]', params: { id: routine.id } },
     );
+  };
 
   return (
     <Pressable onPress={goToPlay}>
@@ -194,8 +200,7 @@ const styles = StyleSheet.create({
   },
   routineCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',

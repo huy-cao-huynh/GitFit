@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -11,127 +11,91 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SFSymbol } from 'expo-symbols';
 
 import { AnimatedNumber } from '@/components/animated-number';
+import { BarChart, type BarChartBar } from '@/components/bar-chart';
 import { ContributionGrid } from '@/components/contribution-grid';
-import { IconButton } from '@/components/icon-button';
 import { LineChart } from '@/components/line-chart';
+import { RangeToggle } from '@/components/range-toggle';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing, Type } from '@/constants/theme';
-import {
-  ageFromBirthday,
-  bmi,
-  bodyFatPercent,
-  exerciseNames,
-  measurementSeries,
-  strengthSeries,
-  toDateKey,
-  todayKey,
-  type Sex,
-} from '@/lib/store/derive';
-import { makeId } from '@/lib/store/id';
-import type { ProgressPoint } from '@/lib/store/types';
-import {
-  formatWeight,
-  fromDisplayWeight,
-  toDisplayVolume,
-  toDisplayWeight,
-  volumeUnitLabel,
-  weightUnitLabel,
-} from '@/lib/units';
-import { useAuth } from '@/providers/auth-provider';
+import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
+import type { ProgressPoint, Session, StepsEntry } from '@/lib/store/types';
+import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
+import { toDisplayWeight, weightUnitLabel } from '@/lib/units';
+import { funWeightUnit } from '@/lib/weight-fun-units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 
 type MetricRange = 'week' | 'month' | 'all';
 const METRIC_RANGE_LABELS: Record<MetricRange, string> = { week: 'Week', month: 'Month', all: 'All time' };
+const METRIC_RANGE_OPTIONS = (['week', 'month', 'all'] as MetricRange[]).map((id) => ({
+  id,
+  label: METRIC_RANGE_LABELS[id],
+}));
+
+type StepsRange = 'week' | 'month' | 'year';
+const STEPS_RANGE_LABELS: Record<StepsRange, string> = { week: 'Week', month: 'Month', year: 'Year' };
+const STEPS_RANGE_OPTIONS = (['week', 'month', 'year'] as StepsRange[]).map((id) => ({
+  id,
+  label: STEPS_RANGE_LABELS[id],
+}));
+
+const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export default function ProgressScreen() {
-  const {
-    sessions,
-    cardioSessions,
-    bodyweight,
-    addBodyweight,
-    steps,
-    waterEntries,
-    measurementDefs,
-    setMeasurementDefs,
-    measurementEntries,
-    addMeasurementEntry,
-    preferences,
-  } = useStore();
-  const { session } = useAuth();
+  const { sessions, cardioSessions, bodyweight, steps, preferences } = useStore();
   const unitSystem = preferences.unitSystem;
-  const [metricRange, setMetricRange] = useState<MetricRange>('month');
+  const [stepsRange, setStepsRange] = useState<StepsRange>('week');
+  const [clusterRange, setClusterRange] = useState<MetricRange>('month');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
-  const [weight, setWeight] = useState('');
-  const [newMeasurementLabel, setNewMeasurementLabel] = useState('');
-  const [newMeasurementUnit, setNewMeasurementUnit] = useState(unitSystem === 'metric' ? 'cm' : 'in');
-  const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
+  const [showFunUnit, setShowFunUnit] = useState(true);
+  const scrollRef = useResetScrollOnFocus<ScrollView>();
 
   const latestWeight = bodyweight[bodyweight.length - 1];
-  const metadata = session?.user.user_metadata ?? {};
-  const heightInches = Number(metadata.height_inches as string | undefined) || null;
-  const birthday = (metadata.birthday as string | undefined) || null;
-  const sex = ((metadata.sex as string | undefined) ?? 'unset') as Sex | 'unset';
-  const bmiValue = bmi(latestWeight?.weight ?? null, heightInches);
-  const age = ageFromBirthday(birthday);
-  const bodyFat = bodyFatPercent(bmiValue, age, sex === 'unset' ? null : sex);
 
-  const saveWeight = () => {
-    const displayValue = Number(weight);
-    if (!Number.isFinite(displayValue) || displayValue <= 0) return;
-    addBodyweight({ date: todayKey(), weight: fromDisplayWeight(displayValue, unitSystem) });
-    setWeight('');
-  };
-
-  const addMeasurementSection = () => {
-    const label = newMeasurementLabel.trim();
-    const unit = newMeasurementUnit.trim();
-    if (!label || !unit) return;
-    if (measurementDefs.some((def) => def.label.toLowerCase() === label.toLowerCase())) return;
-    setMeasurementDefs([...measurementDefs, { id: makeId(), label, unit }]);
-    setNewMeasurementLabel('');
-  };
-
-  const saveMeasurement = (defId: string, label: string, unit: string) => {
-    const raw = measurementValues[defId];
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) return;
-    addMeasurementEntry({ id: makeId(), date: todayKey(), label, value, unit });
-    setMeasurementValues((current) => ({ ...current, [defId]: '' }));
-  };
+  const currentYear = String(new Date().getFullYear());
+  const yearSessionCount =
+    sessions.filter((s) => s.date.startsWith(currentYear)).length +
+    cardioSessions.filter((s) => s.date.startsWith(currentYear)).length;
 
   const names = exerciseNames(sessions);
+  const hasExercises = names.length > 0;
   const exercise = selectedExercise ?? names[0];
-  const strengthPoints = filterPoints(exercise ? strengthSeries(sessions, exercise) : [], metricRange).map((point) => ({
-    ...point,
-    value: toDisplayWeight(point.value, unitSystem),
-  }));
-  const stepsPoints: ProgressPoint[] = filterPoints(
-    steps.map((entry) => ({ date: entry.date, value: entry.steps })),
-    metricRange,
+  const strengthPoints = filterPoints(exercise ? strengthSeries(sessions, exercise) : [], clusterRange).map(
+    (point) => ({
+      ...point,
+      value: toDisplayWeight(point.value, unitSystem),
+    }),
   );
+  const stepsBars = buildStepsBars(steps, stepsRange);
+  const stepsLatest = stepsBars.find((bar) => bar.highlighted)?.value ?? 0;
   const bodyweightPoints: ProgressPoint[] = filterPoints(
     bodyweight.map((entry) => ({ date: entry.date, value: toDisplayWeight(entry.weight, unitSystem) })),
-    metricRange,
+    clusterRange,
   );
   const calorieSources = [
     ...sessions.map((s) => ({ date: s.date, calories: s.calories ?? 0 })),
     ...cardioSessions.map((s) => ({ date: s.date, calories: s.calories ?? 0 })),
   ];
-  const caloriePoints = filterPoints(aggregateByDate(calorieSources, (entry) => entry.calories), metricRange);
-  const cardioPoints = filterPoints(aggregateByDate(cardioSessions, (entry) => entry.minutes), metricRange);
-  const waterPoints = filterPoints(aggregateByDate(waterEntries, (entry) => entry.ounces), metricRange).map((point) => ({
-    ...point,
-    value: toDisplayVolume(point.value, unitSystem),
-  }));
+  const caloriePoints = filterPoints(aggregateByDate(calorieSources, (entry) => entry.calories), clusterRange);
+  const volumePoints = filterPoints(
+    aggregateByDate(sessions.map((s) => ({ date: s.date, volume: sessionVolume(s) })), (entry) => entry.volume),
+    clusterRange,
+  );
+  const totalVolumeLbs = volumePoints.reduce((sum, point) => sum + point.value, 0);
+  const caloriesTotal = caloriePoints.reduce((sum, point) => sum + point.value, 0);
+  const funVolume = funWeightUnit(totalVolumeLbs);
+  const totalLifted = showFunUnit
+    ? { value: funVolume.value, unit: funVolume.unit, decimals: 1, grouped: false }
+    : { value: toDisplayWeight(totalVolumeLbs, unitSystem), unit: weightUnitLabel(unitSystem), decimals: 0, grouped: true };
 
   const chartWidth = contentWidth > 0 ? contentWidth - Spacing.three * 2 : 0;
   // Half-width bento tile: (content − gap) / 2, minus the tile's own padding.
@@ -143,247 +107,111 @@ export default function ProgressScreen() {
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
           onLayout={(event) => setContentWidth(Math.min(event.nativeEvent.layout.width, MaxContentWidth) - Spacing.four * 2)}>
           <View style={styles.headerRow}>
-            <ThemedText type="subtitle">Progress</ThemedText>
+            <View>
+              <ThemedText type="subtitle">Progress</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Track your activity and strength over time
+              </ThemedText>
+            </View>
           </View>
 
           {chartWidth > 0 && (
-            <>
-              <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-                DAY TRACKING
-              </ThemedText>
-              <View style={[styles.card, styles.invertedCard]}>
-                <View style={styles.statHeader}>
-                  <View>
-                    <ThemedText type="small" style={styles.invertedTextDim}>
-                      Workout activity
-                    </ThemedText>
-                    <ThemedText type="stat" style={styles.invertedText}>
-                      Year to date
-                    </ThemedText>
-                  </View>
+            <View style={[styles.card, styles.invertedCard]}>
+              <View style={styles.statHeader}>
+                <View>
                   <ThemedText type="small" style={styles.invertedTextDim}>
-                    daily sessions
+                    Daily sessions
+                  </ThemedText>
+                  <ThemedText type="stat" style={styles.invertedText}>
+                    {yearSessionCount}
                   </ThemedText>
                 </View>
-                <ContributionGrid sessions={sessions} cardioSessions={cardioSessions} width={chartWidth} inverted />
+                <ThemedText type="small" style={styles.invertedTextDim}>
+                  Year to date
+                </ThemedText>
               </View>
-            </>
+              <ContributionGrid sessions={sessions} cardioSessions={cardioSessions} width={chartWidth} inverted />
+            </View>
           )}
 
-          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+          <ThemedText type="label" style={styles.sectionLabel}>
             TRACKING
           </ThemedText>
 
-          <View style={styles.metricRangeRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Chart range
-            </ThemedText>
-            <Dropdown
-              label={METRIC_RANGE_LABELS[metricRange]}
-              options={(['week', 'month', 'all'] as MetricRange[]).map((r) => ({ id: r, label: METRIC_RANGE_LABELS[r] }))}
-              onSelect={(id) => setMetricRange(id as MetricRange)}
-            />
-          </View>
-
-          {stepsPoints.length > 0 && (
-            <ThemedView type="surface" style={styles.card}>
-              <StatHeader
-                label="Steps"
-                latest={`${stepsPoints[stepsPoints.length - 1].value.toLocaleString()}`}
-                caption={METRIC_RANGE_LABELS[metricRange].toLowerCase()}
-              />
-              {chartWidth > 0 && <LineChart points={stepsPoints} width={chartWidth} color={ChartColors.steps} />}
-            </ThemedView>
-          )}
-
-          {caloriePoints.length > 0 && (
-            <ThemedView type="surface" style={styles.card}>
-              <StatHeader
-                label="Calories burned"
-                latest={`${caloriePoints[caloriePoints.length - 1].value} cal`}
-                caption={deltaCaption(caloriePoints, 'cal')}
-              />
-              {chartWidth > 0 && <LineChart points={caloriePoints} width={chartWidth} color={ChartColors.calories} />}
-            </ThemedView>
-          )}
-
-          {tileChartWidth > 0 && (cardioPoints.length > 0 || waterPoints.length > 0) && (
-            <View style={styles.tileGrid}>
-              {cardioPoints.length > 0 && (
-                <StatTile
-                  label="Cardio"
-                  value={cardioPoints[cardioPoints.length - 1].value}
-                  unit="min"
-                  points={cardioPoints}
-                  color={ChartColors.cardio}
-                  chartWidth={tileChartWidth}
-                />
-              )}
-              {waterPoints.length > 0 && (
-                <StatTile
-                  label="Water"
-                  value={waterPoints[waterPoints.length - 1].value}
-                  unit={volumeUnitLabel(unitSystem)}
-                  points={waterPoints}
-                  color={ChartColors.water}
-                  chartWidth={tileChartWidth}
-                />
-              )}
-            </View>
-          )}
-
-          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-            BODY
-          </ThemedText>
-
           <ThemedView type="surface" style={styles.card}>
-            <StatHeader
-              label="Body weight"
-              latest={latestWeight ? formatWeight(latestWeight.weight, unitSystem) : 'No logs'}
-              caption={deltaCaption(bodyweightPoints, weightUnitLabel(unitSystem))}
-            />
-            <View style={styles.entryRow}>
-              <TextInput
-                style={[styles.entryInput, styles.flex]}
-                placeholder={`Log today's weight (${weightUnitLabel(unitSystem)})`}
-                placeholderTextColor={colors.textSecondary}
-                value={weight}
-                onChangeText={setWeight}
-                keyboardType="decimal-pad"
-              />
-              <IconButton icon="checkmark.circle.fill" active={!!weight.trim()} onPress={saveWeight} />
-            </View>
-            {chartWidth > 0 && bodyweightPoints.length > 1 && (
-              <LineChart points={bodyweightPoints} width={chartWidth} color={ChartColors.bodyweight} />
-            )}
-          </ThemedView>
-
-          <ThemedView type="surface" style={styles.card}>
-            <ThemedText type="smallBold">BMI &amp; Body Fat</ThemedText>
-            {bmiValue !== null ? (
-              <>
-                <ThemedText type="small">
-                  BMI <ThemedText type="smallBold">{bmiValue}</ThemedText>
-                </ThemedText>
-                <ThemedText type="small">
-                  Body fat{' '}
-                  <ThemedText type="smallBold">{bodyFat !== null ? `${bodyFat}%` : '—'}</ThemedText>
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {bodyFat !== null
-                    ? 'Rough estimate — accurate body-composition tracking is coming later.'
-                    : 'Add birthday & sex in Settings for a body-fat estimate.'}
-                </ThemedText>
-              </>
-            ) : (
+            <StatHeader label="Steps" latest={stepsLatest.toLocaleString()} caption={STEPS_RANGE_LABELS[stepsRange].toLowerCase()} />
+            <RangeToggle options={STEPS_RANGE_OPTIONS} value={stepsRange} onChange={setStepsRange} />
+            {chartWidth > 0 && <BarChart bars={stepsBars} width={chartWidth} color={ChartColors.steps} />}
+            {steps.length === 0 && (
               <ThemedText type="small" themeColor="textSecondary">
-                Log your weight and add height in Settings to see BMI.
+                Steps sync once Apple Health is connected.
               </ThemedText>
             )}
           </ThemedView>
 
-          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-            MEASUREMENTS
-          </ThemedText>
+          <RangeToggle options={METRIC_RANGE_OPTIONS} value={clusterRange} onChange={setClusterRange} />
 
-          {measurementDefs.map((def) => {
-            const latest = measurementEntries.find((entry) => entry.label === def.label);
-            const points = filterPoints(measurementSeries(measurementEntries, def.label), metricRange);
-            return (
-              <ThemedView key={def.id} type="surface" style={styles.card}>
-                <View style={styles.measurementHeader}>
-                  <View style={styles.flex}>
-                    <ThemedText type="small">
-
-                    </ThemedText>
-                    <ThemedText type="stat">
-                      {latest ? `${latest.value} ${latest.unit}` : 'No logs'}
-                    </ThemedText>
-                  </View>
-                  <Pressable
-                    hitSlop={8}
-                    onPress={() => setMeasurementDefs(measurementDefs.filter((existing) => existing.id !== def.id))}>
-                    <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
-                  </Pressable>
-                </View>
-                <View style={styles.entryRow}>
-                  <TextInput
-                    style={[styles.entryInput, styles.flex]}
-                    placeholder={`Log ${def.label.toLowerCase()} (${def.unit})`}
-                    placeholderTextColor={colors.textSecondary}
-                    value={measurementValues[def.id] ?? ''}
-                    onChangeText={(text) => setMeasurementValues((current) => ({ ...current, [def.id]: text }))}
-                    keyboardType="decimal-pad"
-                  />
-                  <IconButton
-                    icon="checkmark.circle.fill"
-                    active={!!measurementValues[def.id]?.trim()}
-                    onPress={() => saveMeasurement(def.id, def.label, def.unit)}
-                  />
-                </View>
-                {chartWidth > 0 && points.length > 1 && (
-                  <LineChart points={points} width={chartWidth} height={56} color={ChartColors.bodyweight} sparkline />
-                )}
-              </ThemedView>
-            );
-          })}
-
-          <ThemedView type="surface" style={styles.card}>
-            <ThemedText type="smallBold">Add measurement section</ThemedText>
-            <View style={styles.entryRow}>
-              <TextInput
-                style={[styles.entryInput, styles.flex]}
-                placeholder="e.g. Chest"
-                placeholderTextColor={colors.textSecondary}
-                value={newMeasurementLabel}
-                onChangeText={setNewMeasurementLabel}
+          {tileChartWidth > 0 && (
+            <View style={styles.tileGrid}>
+              <MetricTile
+                label="Weight"
+                value={latestWeight ? toDisplayWeight(latestWeight.weight, unitSystem) : null}
+                unit={weightUnitLabel(unitSystem)}
+                points={bodyweightPoints}
+                color={ChartColors.bodyweight}
+                chartWidth={tileChartWidth}
+                smooth
               />
-              <TextInput
-                style={[styles.entryInput, styles.unitInput]}
-                placeholder="Unit"
-                placeholderTextColor={colors.textSecondary}
-                value={newMeasurementUnit}
-                onChangeText={setNewMeasurementUnit}
+              <MetricTile
+                label={
+                  hasExercises ? (
+                    <Dropdown
+                      label={exercise ?? ''}
+                      options={names.map((name) => ({ id: name, label: name }))}
+                      onSelect={setSelectedExercise}
+                      searchable
+                    />
+                  ) : (
+                    'Strength'
+                  )
+                }
+                value={strengthPoints.length > 0 ? strengthPoints[strengthPoints.length - 1].value : null}
+                unit={weightUnitLabel(unitSystem)}
+                points={strengthPoints}
+                color={ChartColors.strength}
+                chartWidth={tileChartWidth}
               />
-              <IconButton
-                icon="plus.circle.fill"
-                active={!!newMeasurementLabel.trim() && !!newMeasurementUnit.trim()}
-                onPress={addMeasurementSection}
+              <MetricTile
+                label="Calories burned"
+                icon="flame.fill"
+                iconColor={Colors.primary}
+                value={caloriesTotal > 0 ? caloriesTotal : null}
+                unit="cal"
+                points={caloriePoints}
+                color={ChartColors.calories}
+                chartWidth={tileChartWidth}
+                showChart={false}
+                grouped
+              />
+              <MetricTile
+                label="Total lifted"
+                value={totalVolumeLbs > 0 ? totalLifted.value : null}
+                unit={totalLifted.unit}
+                points={volumePoints}
+                color={ChartColors.strength}
+                chartWidth={tileChartWidth}
+                showChart={false}
+                decimals={totalLifted.decimals}
+                grouped={totalLifted.grouped}
+                onPress={() => setShowFunUnit((current) => !current)}
+                trailingIcon="arrow.triangle.2.circlepath"
               />
             </View>
-          </ThemedView>
-
-          <View style={styles.strengthHeader}>
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-              STRENGTH
-            </ThemedText>
-            {names.length > 0 && (
-              <Dropdown
-                label={exercise ?? ''}
-                options={names.map((name) => ({ id: name, label: name }))}
-                onSelect={setSelectedExercise}
-                searchable
-              />
-            )}
-          </View>
-
-          {strengthPoints.length > 0 ? (
-            <ThemedView type="surface" style={styles.card}>
-              <StatHeader
-                label={exercise!}
-                latest={`${strengthPoints[strengthPoints.length - 1].value} ${weightUnitLabel(unitSystem)}`}
-                caption={deltaCaption(strengthPoints, weightUnitLabel(unitSystem))}
-              />
-              {chartWidth > 0 && <LineChart points={strengthPoints} width={chartWidth} color={ChartColors.strength} />}
-            </ThemedView>
-          ) : (
-            <ThemedText type="small" themeColor="textSecondary">
-              Log workouts to see strength trends per movement.
-            </ThemedText>
           )}
         </ScrollView>
         </KeyboardAvoidingView>
@@ -393,33 +221,96 @@ export default function ProgressScreen() {
   );
 }
 
-function StatTile({
+function MetricTile({
   label,
+  icon,
+  iconColor,
   value,
   unit,
   points,
   color,
   chartWidth,
+  decimals = 0,
+  grouped = false,
+  smooth = false,
+  showChart = true,
+  onPress,
+  trailingIcon,
 }: {
-  label: string;
-  value: number;
+  label: ReactNode;
+  icon?: SFSymbol;
+  iconColor?: string;
+  value: number | null;
   unit: string;
   points: ProgressPoint[];
   color: string;
   chartWidth: number;
+  decimals?: number;
+  grouped?: boolean;
+  smooth?: boolean;
+  showChart?: boolean;
+  onPress?: () => void;
+  trailingIcon?: SFSymbol;
 }) {
+  const content = (
+    <>
+      <View style={styles.tileLabelRow}>
+        {icon && <SymbolView name={icon} size={13} tintColor={iconColor ?? colors.textSecondary} />}
+        {typeof label === 'string' ? (
+          <ThemedText type="small" numberOfLines={1} style={styles.flex}>
+            {label}
+          </ThemedText>
+        ) : (
+          label
+        )}
+        {trailingIcon && <SymbolView name={trailingIcon} size={11} tintColor={colors.textSecondary} />}
+      </View>
+      {value !== null ? (
+        <>
+          <View style={[styles.tileValueRow, !showChart && styles.tileValueRowLarge]}>
+            <AnimatedNumber
+              value={value}
+              decimals={decimals}
+              grouped={grouped}
+              style={showChart ? styles.tileValue : styles.tileValueLarge}
+            />
+            <ThemedText type="small">{unit}</ThemedText>
+          </View>
+          {showChart && points.length > 1 && (
+            <LineChart points={points} width={chartWidth} height={56} color={color} sparkline smooth={smooth} />
+          )}
+        </>
+      ) : (
+        <ThemedText type="small" themeColor="textSecondary">
+          No logs
+        </ThemedText>
+      )}
+    </>
+  );
+
   return (
     <ThemedView type="surface" style={styles.tile}>
-      <ThemedText type="small" numberOfLines={1}>
-        {label}
-      </ThemedText>
-      <View style={styles.tileValueRow}>
-        <AnimatedNumber value={value} style={styles.tileValue} />
-        <ThemedText type="small">{unit}</ThemedText>
-      </View>
-      <LineChart points={points} width={chartWidth} height={56} color={color} sparkline />
+      {onPress ? (
+        <Pressable onPress={onPress} style={[styles.tileInner, !showChart && styles.tileInnerCentered]}>
+          {content}
+        </Pressable>
+      ) : (
+        <View style={[styles.tileInner, !showChart && styles.tileInnerCentered]}>{content}</View>
+      )}
     </ThemedView>
   );
+}
+
+/** Total working-set volume (reps × weight) for a session, canonical lbs. */
+function sessionVolume(session: Session): number {
+  let total = 0;
+  for (const ex of session.exercises) {
+    for (const set of ex.sets) {
+      if (set.isWarmup || set.skipped) continue;
+      if (set.weight && set.reps) total += set.weight * set.reps;
+    }
+  }
+  return total;
 }
 
 function filterPoints(points: ProgressPoint[], range: MetricRange): ProgressPoint[] {
@@ -440,11 +331,50 @@ function aggregateByDate<T extends { date: string }>(entries: T[], valueFor: (en
     .map(([date, value]) => ({ date, value }));
 }
 
-function deltaCaption(points: ProgressPoint[], unit: string): string {
-  if (points.length < 2) return '';
-  const delta = points[points.length - 1].value - points[0].value;
-  const sign = delta > 0 ? '+' : '';
-  return `${sign}${delta} ${unit}`;
+function stepsForDate(steps: StepsEntry[], dateKey: string): number {
+  return steps.find((entry) => entry.date === dateKey)?.steps ?? 0;
+}
+
+/** Buckets StepsEntry[] into day-of-week (week), day-of-month (month), or month (year) bars. */
+function buildStepsBars(steps: StepsEntry[], range: StepsRange): BarChartBar[] {
+  const today = new Date();
+  const todayKeyValue = toDateKey(today);
+
+  if (range === 'week') {
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + index);
+      const dateKey = toDateKey(date);
+      return { label: WEEKDAY_LABELS[index], value: stepsForDate(steps, dateKey), highlighted: dateKey === todayKeyValue };
+    });
+  }
+
+  if (range === 'month') {
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return Array.from({ length: daysInMonth }, (_, index) => {
+      const day = index + 1;
+      const dateKey = toDateKey(new Date(year, month, day));
+      const showLabel = day === 1 || day === 15 || day === daysInMonth;
+      return {
+        label: showLabel ? String(day) : '',
+        value: stepsForDate(steps, dateKey),
+        highlighted: dateKey === todayKeyValue,
+      };
+    });
+  }
+
+  const year = today.getFullYear();
+  const currentMonth = today.getMonth();
+  const monthTotals = new Array(12).fill(0);
+  for (const entry of steps) {
+    const [entryYear, entryMonth] = entry.date.split('-').map(Number);
+    if (entryYear === year) monthTotals[entryMonth - 1] += entry.steps;
+  }
+  return monthTotals.map((value, index) => ({ label: MONTH_LABELS[index], value, highlighted: index === currentMonth }));
 }
 
 function StatHeader({ label, latest, caption }: { label: string; latest: string; caption?: string }) {
@@ -465,6 +395,12 @@ function StatHeader({ label, latest, caption }: { label: string; latest: string;
   );
 }
 
+const MENU_MAX_HEIGHT = 220;
+const SEARCH_HEIGHT = 44;
+const MENU_WIDTH = 180;
+const SEARCH_MENU_WIDTH = 240;
+const EDGE_MARGIN = Spacing.three;
+
 function Dropdown({
   label,
   options,
@@ -478,16 +414,32 @@ function Dropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const triggerRef = useRef<View>(null);
-  const { width: screenWidth } = useWindowDimensions();
-  const filtered = searchable
-    ? options.filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase()))
-    : options;
+  const scrollRef = useRef<ScrollView>(null);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const menuWidth = searchable ? SEARCH_MENU_WIDTH : MENU_WIDTH;
+  const filtered = useMemo(
+    () =>
+      searchable ? options.filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase())) : options,
+    [options, query, searchable],
+  );
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [query]);
 
   const openMenu = () => {
     triggerRef.current?.measureInWindow((x, y, width, height) => {
-      setAnchor({ top: y + height + 6, right: screenWidth - (x + width) });
+      const menuHeight = MENU_MAX_HEIGHT + (searchable ? SEARCH_HEIGHT : 0);
+      const spaceBelow = screenHeight - (y + height);
+      const spaceAbove = y;
+      const openUpward = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+      // Anchor from the trigger's left edge, but clamp so the menu can never render off either edge of the screen.
+      const left = Math.min(Math.max(x, EDGE_MARGIN), screenWidth - menuWidth - EDGE_MARGIN);
+      setAnchor(
+        openUpward ? { bottom: screenHeight - y + 6, left } : { top: y + height + 6, left },
+      );
       setOpen(true);
     });
   };
@@ -500,14 +452,16 @@ function Dropdown({
   return (
     <View style={styles.dropdown}>
       <Pressable ref={triggerRef} style={styles.dropdownTrigger} onPress={openMenu}>
-        <ThemedText type="small">{label}</ThemedText>
+        <ThemedText type="small" numberOfLines={1} style={styles.dropdownLabel}>
+          {label}
+        </ThemedText>
         <SymbolView name={open ? 'chevron.up' : 'chevron.down'} size={11} tintColor={colors.textSecondary} />
       </Pressable>
       {/* Rendered in a Modal (its own native overlay layer) so it always draws above the anchored TabBar, which lives outside this screen's view tree and ignores in-screen zIndex. */}
       <Modal transparent visible={open} animationType="fade" onRequestClose={closeMenu}>
         <Pressable style={styles.modalBackdrop} onPress={closeMenu} />
         {anchor && (
-          <View style={[styles.dropdownMenu, { top: anchor.top, right: anchor.right }]}>
+          <View style={[styles.dropdownMenu, { top: anchor.top, bottom: anchor.bottom, left: anchor.left, width: menuWidth }]}>
             {searchable && (
               <TextInput
                 style={styles.dropdownSearch}
@@ -518,20 +472,26 @@ function Dropdown({
                 autoCapitalize="none"
               />
             )}
-            <ScrollView style={styles.dropdownScroll} keyboardShouldPersistTaps="handled">
-              {filtered.map((option, index) => (
-                <Pressable
-                  key={option.id}
-                  style={[styles.dropdownOption, index > 0 && styles.dropdownOptionDivider]}
-                  onPress={() => {
-                    onSelect(option.id);
-                    closeMenu();
-                  }}>
-                  <ThemedText type="small" themeColor={option.label === label ? 'primaryLight' : 'text'}>
-                    {option.label}
-                  </ThemedText>
-                </Pressable>
-              ))}
+            <ScrollView ref={scrollRef} style={styles.dropdownScroll} keyboardShouldPersistTaps="handled">
+              {filtered.length === 0 ? (
+                <ThemedText type="small" themeColor="textSecondary" style={styles.dropdownEmpty}>
+                  No movements match &quot;{query.trim()}&quot;
+                </ThemedText>
+              ) : (
+                filtered.map((option, index) => (
+                  <Pressable
+                    key={option.id}
+                    style={[styles.dropdownOption, index > 0 && styles.dropdownOptionDivider]}
+                    onPress={() => {
+                      onSelect(option.id);
+                      closeMenu();
+                    }}>
+                    <ThemedText type="small" themeColor={option.label === label ? 'primaryLight' : 'text'}>
+                      {option.label}
+                    </ThemedText>
+                  </Pressable>
+                ))
+              )}
             </ScrollView>
           </View>
         )}
@@ -569,26 +529,14 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: Spacing.two,
   },
-  metricRangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  strengthHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   card: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.two,
   },
   invertedCard: {
     backgroundColor: colors.primary,
-    borderColor: 'transparent',
   },
   invertedText: {
     color: colors.onPrimary,
@@ -604,10 +552,21 @@ const styles = StyleSheet.create({
   tile: {
     flexBasis: '47%',
     flexGrow: 1,
+    minHeight: 140,
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
+  },
+  tileInner: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  tileInnerCentered: {
+    justifyContent: 'center',
+  },
+  tileLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.one,
   },
   tileValueRow: {
@@ -615,73 +574,51 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: Spacing.one,
   },
+  tileValueRowLarge: {
+    marginTop: Spacing.one,
+  },
   tileValue: {
     ...Type.statSm,
     fontSize: 22,
     lineHeight: 28,
+  },
+  tileValueLarge: {
+    ...Type.statMd,
   },
   statHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
   },
-  measurementHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-  },
-  entryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  entryInput: {
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    color: colors.text,
-    backgroundColor: colors.surfaceElevated,
-    fontSize: 14,
-  },
-  unitInput: {
-    width: 72,
-  },
   dropdown: {
     position: 'relative',
+    flexShrink: 1,
   },
   dropdownTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+  },
+  dropdownLabel: {
+    flexShrink: 1,
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFill,
   },
   dropdownMenu: {
     position: 'absolute',
-    minWidth: 160,
     borderRadius: Radius.md,
     backgroundColor: colors.surfaceElevated,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
     overflow: 'hidden',
   },
   dropdownSearch: {
-    minWidth: 220,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     color: colors.text,
     backgroundColor: colors.surfaceElevated,
   },
   dropdownScroll: {
-    maxHeight: 220,
+    maxHeight: MENU_MAX_HEIGHT,
   },
   dropdownOption: {
     paddingHorizontal: Spacing.three,
@@ -690,5 +627,9 @@ const styles = StyleSheet.create({
   dropdownOptionDivider: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  dropdownEmpty: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
   },
 });

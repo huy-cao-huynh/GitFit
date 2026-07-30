@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -12,39 +13,61 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { GradientFill } from '@/components/gradient-fill';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Gradients, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
 import {
   gramsToOunces,
   macrosForGrams,
   ouncesToGrams,
+  parseServingGrams,
   searchFoods,
   type FoodSearchResult,
 } from '@/lib/nutrition/open-food-facts';
-import { MEAL_LABELS, MEAL_ORDER, recipePerServing, scaleMacros, todayKey } from '@/lib/store/derive';
+import {
+  MEAL_LABELS,
+  MEAL_ORDER,
+  recentFoods,
+  recipePerServing,
+  scaleMacros,
+  todayKey,
+  type RecentFood,
+} from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import type { MealType, Recipe } from '@/lib/store/types';
+import type { Macros, MealType, Recipe } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 const SEARCH_DEBOUNCE_MS = 400;
 
 type AmountUnit = 'g' | 'oz';
+type AmountMode = 'servings' | 'custom';
+
+/** What `AmountPanel` needs to compute macros/preview — satisfied by both a fresh search result and a recent food. */
+type AmountFood = Pick<
+  FoodSearchResult,
+  'name' | 'brand' | 'servingSize' | 'caloriesPer100g' | 'proteinPer100g' | 'carbsPer100g' | 'fatPer100g'
+>;
+
+/** Either a weight-based food (search result / recent food, scales by grams) or a recipe (scales by serving count). */
+type AmountSource =
+  | { kind: 'weight'; food: AmountFood; initialGrams: number }
+  | { kind: 'recipe'; recipe: Recipe };
 
 export default function FoodSearchScreen() {
   const params = useLocalSearchParams<{ date?: string; meal?: MealType }>();
-  const { recipes, addFoodLog } = useStore();
+  const { recipes, foodLogs, addFoodLog } = useStore();
   const date = params.date ?? todayKey();
+  const recents = recentFoods(foodLogs);
 
   const [meal, setMeal] = useState<MealType>(params.meal ?? 'breakfast');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<FoodSearchResult | null>(null);
+  const [selected, setSelected] = useState<AmountSource | null>(null);
   const [showCustom, setShowCustom] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -121,19 +144,30 @@ export default function FoodSearchScreen() {
 
           {selected ? (
             <AmountPanel
-              food={selected}
+              source={selected}
               onBack={() => setSelected(null)}
-              onLog={(grams, macros) =>
-                logAndClose({
-                  id: makeId(),
-                  date,
-                  meal,
-                  name: selected.name,
-                  brand: selected.brand,
-                  grams,
-                  ...macros,
-                })
-              }
+              onLog={(result) => {
+                if (selected.kind === 'weight') {
+                  logAndClose({
+                    id: makeId(),
+                    date,
+                    meal,
+                    name: selected.food.name,
+                    brand: selected.food.brand,
+                    grams: result.grams,
+                    ...result.macros,
+                  });
+                } else {
+                  const count = Math.round(result.servings * 100) / 100;
+                  logAndClose({
+                    id: makeId(),
+                    date,
+                    meal,
+                    name: count === 1 ? selected.recipe.name : `${selected.recipe.name} ×${count}`,
+                    ...result.macros,
+                  });
+                }
+              }}
             />
           ) : showCustom ? (
             <CustomFoodPanel
@@ -164,6 +198,21 @@ export default function FoodSearchScreen() {
                 </ThemedText>
               </Pressable>
 
+              {recents.length > 0 && query.trim().length < 2 && (
+                <View style={styles.recipeSection}>
+                  <ThemedText type="label" style={styles.sectionLabel}>
+                    RECENTLY EATEN
+                  </ThemedText>
+                  {recents.map((food) => (
+                    <RecentFoodRow
+                      key={`${food.name}|${food.brand ?? ''}`}
+                      food={food}
+                      onPress={() => setSelected({ kind: 'weight', food, initialGrams: food.grams })}
+                    />
+                  ))}
+                </View>
+              )}
+
               {searching && <ActivityIndicator style={styles.spinner} color={colors.primaryLight} />}
               {searchError && (
                 <ThemedText type="small" themeColor="danger">
@@ -175,7 +224,7 @@ export default function FoodSearchScreen() {
                 <Pressable
                   key={result.code}
                   style={styles.resultRow}
-                  onPress={() => setSelected(result)}>
+                  onPress={() => setSelected({ kind: 'weight', food: result, initialGrams: 100 })}>
                   <View style={styles.resultText}>
                     <ThemedText type="smallBold" numberOfLines={1}>
                       {result.name}
@@ -191,23 +240,14 @@ export default function FoodSearchScreen() {
 
               {recipes.length > 0 && query.trim().length < 2 && (
                 <View style={styles.recipeSection}>
-                  <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+                  <ThemedText type="label" style={styles.sectionLabel}>
                     RECIPE BOOK
                   </ThemedText>
                   {recipes.map((recipe) => (
-                    <RecipeRow
+                    <RecipeSearchRow
                       key={recipe.id}
                       recipe={recipe}
-                      onLog={(servings) => {
-                        const macros = scaleMacros(recipePerServing(recipe), servings);
-                        logAndClose({
-                          id: makeId(),
-                          date,
-                          meal,
-                          name: servings === 1 ? recipe.name : `${recipe.name} ×${servings}`,
-                          ...macros,
-                        });
-                      }}
+                      onPress={() => setSelected({ kind: 'recipe', recipe })}
                     />
                   ))}
                 </View>
@@ -220,83 +260,214 @@ export default function FoodSearchScreen() {
   );
 }
 
+function RecentFoodRow({ food, onPress }: { food: RecentFood; onPress: () => void }) {
+  return (
+    <Pressable style={styles.resultRow} onPress={onPress}>
+      <View style={styles.resultText}>
+        <ThemedText type="smallBold" numberOfLines={1}>
+          {food.name}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+          {food.brand ? `${food.brand} · ` : ''}last time: {Math.round(food.grams)} g
+        </ThemedText>
+      </View>
+      <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+    </Pressable>
+  );
+}
+
+/** Two-option sliding pill toggle — same idiom as the tab bar's sliding indicator. */
+function SlidingToggle<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const optionWidth = useSharedValue(0);
+  const index = Math.max(0, options.findIndex((option) => option.value === value));
+  const position = useSharedValue(index);
+
+  useEffect(() => {
+    position.set(withTiming(index, { duration: Motion.base }));
+  }, [index, position]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    width: optionWidth.get(),
+    transform: [{ translateX: position.get() * optionWidth.get() }],
+  }));
+
+  return (
+    <View
+      style={styles.slidingTrack}
+      onLayout={(e: LayoutChangeEvent) => optionWidth.set(e.nativeEvent.layout.width / options.length)}>
+      <Animated.View style={[styles.slidingIndicator, indicatorStyle]} />
+      {options.map((option) => (
+        <Pressable key={option.value} style={styles.slidingOption} onPress={() => onChange(option.value)}>
+          <ThemedText type="small" themeColor={option.value === value ? 'onPrimary' : 'textSecondary'}>
+            {option.label}
+          </ThemedText>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Shared amount screen for search results, recent foods, and recipe-book
+ * servings, so any of them can have their portion controlled exactly.
+ * Weight-based sources (search/recent) scale by grams; recipes have no
+ * reliable weight data, so they scale by (fractional) serving count instead.
+ */
 function AmountPanel({
-  food,
+  source,
   onBack,
   onLog,
 }: {
-  food: FoodSearchResult;
+  source: AmountSource;
   onBack: () => void;
-  onLog: (grams: number, macros: ReturnType<typeof macrosForGrams>) => void;
+  onLog: (result: { grams?: number; servings: number; macros: Macros }) => void;
 }) {
-  const [unit, setUnit] = useState<AmountUnit>('g');
-  const [amountText, setAmountText] = useState('100');
+  const isRecipe = source.kind === 'recipe';
+  const parsedServingGrams = source.kind === 'weight' ? parseServingGrams(source.food.servingSize) : null;
+  // Falls back to the default/last-used amount as "1 serving" when the food
+  // has no explicit OFF serving size, so Servings mode is always available.
+  const baseGrams = source.kind === 'weight' ? (parsedServingGrams ?? source.initialGrams) : 0;
+  const perServing: Macros = isRecipe ? recipePerServing(source.recipe) : macrosForGrams(source.food, baseGrams);
 
-  const amount = Number(amountText) || 0;
-  const grams = unit === 'g' ? amount : ouncesToGrams(amount);
-  const macros = macrosForGrams(food, grams);
+  const [mode, setMode] = useState<AmountMode>(isRecipe || parsedServingGrams ? 'servings' : 'custom');
+  const [servings, setServings] = useState(1);
+  const [unit, setUnit] = useState<AmountUnit>('g');
+  const [amountText, setAmountText] = useState(
+    source.kind === 'weight' ? String(Math.round(source.initialGrams * 10) / 10) : '1',
+  );
+
+  let grams: number | undefined;
+  let servingsLogged: number;
+  let macros: Macros;
+
+  if (source.kind === 'weight') {
+    if (mode === 'servings') {
+      servingsLogged = servings;
+      grams = servings * baseGrams;
+    } else {
+      const amount = Number(amountText) || 0;
+      grams = unit === 'g' ? amount : ouncesToGrams(amount);
+      servingsLogged = baseGrams > 0 ? grams / baseGrams : 0;
+    }
+    macros = macrosForGrams(source.food, grams);
+  } else {
+    servingsLogged = mode === 'servings' ? servings : Number(amountText) || 0;
+    macros = scaleMacros(perServing, servingsLogged);
+  }
+
+  const canLog = source.kind === 'weight' ? (grams ?? 0) > 0 : servingsLogged > 0;
 
   const switchUnit = (next: AmountUnit) => {
-    if (next === unit) return;
+    if (source.kind !== 'weight' || next === unit) return;
+    const amount = Number(amountText) || 0;
     const converted = next === 'g' ? ouncesToGrams(amount) : gramsToOunces(amount);
     setAmountText(String(Math.round(converted * 10) / 10));
     setUnit(next);
   };
+
+  const name = source.kind === 'weight' ? source.food.name : source.recipe.name;
+  const subtitle =
+    source.kind === 'weight'
+      ? [source.food.brand, source.food.servingSize ? `serving ${source.food.servingSize}` : undefined]
+          .filter(Boolean)
+          .join(' · ')
+      : `Recipe · ${Math.round(perServing.calories)} cal / serving`;
 
   return (
     <ScrollView contentContainerStyle={styles.panelContent} keyboardShouldPersistTaps="handled">
       <Pressable style={styles.backRow} onPress={onBack}>
         <SymbolView name="chevron.left" size={12} tintColor={colors.primaryLight} />
         <ThemedText type="small" style={{ color: colors.primaryLight }}>
-          Back to results
+          Back
         </ThemedText>
       </Pressable>
 
-      <ThemedText type="heading">{food.name}</ThemedText>
-      {food.brand && (
+      <ThemedText type="heading">{name}</ThemedText>
+      {subtitle ? (
         <ThemedText type="small" themeColor="textSecondary">
-          {food.brand}
-          {food.servingSize ? ` · serving ${food.servingSize}` : ''}
+          {subtitle}
         </ThemedText>
-      )}
+      ) : null}
+
+      <SlidingToggle
+        options={[
+          { value: 'servings' as const, label: 'Servings' },
+          { value: 'custom' as const, label: 'Custom' },
+        ]}
+        value={mode}
+        onChange={setMode}
+      />
 
       <ThemedView type="surface" style={styles.panelCard}>
-        <ThemedText type="small" themeColor="textSecondary">
-          Amount
-        </ThemedText>
-        <View style={styles.amountRow}>
-          <TextInput
-            style={styles.amountInput}
-            value={amountText}
-            onChangeText={setAmountText}
-            keyboardType="decimal-pad"
-            selectTextOnFocus
-          />
-          {(['g', 'oz'] as AmountUnit[]).map((option) => (
-            <Pressable
-              key={option}
-              style={[styles.unitChip, unit === option && styles.unitChipActive]}
-              onPress={() => switchUnit(option)}>
-              <ThemedText type="small" themeColor={unit === option ? 'onPrimary' : 'textSecondary'}>
-                {option}
-              </ThemedText>
-            </Pressable>
-          ))}
-        </View>
+        {mode === 'servings' ? (
+          <>
+            <ThemedText type="small" themeColor="textSecondary">
+              {source.kind === 'weight' ? `Servings (${Math.round(baseGrams)} g each)` : 'Servings'}
+            </ThemedText>
+            <View style={styles.servingStepper}>
+              <Pressable hitSlop={6} onPress={() => setServings((s) => Math.max(1, s - 1))}>
+                <SymbolView name="minus.circle" size={24} tintColor={colors.textSecondary} />
+              </Pressable>
+              <ThemedText type="heading">{servings}</ThemedText>
+              <Pressable hitSlop={6} onPress={() => setServings((s) => s + 1)}>
+                <SymbolView name="plus.circle" size={24} tintColor={colors.textSecondary} />
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <>
+            <ThemedText type="small" themeColor="textSecondary">
+              {source.kind === 'weight' ? 'Amount' : 'Servings'}
+            </ThemedText>
+            <View style={styles.amountRow}>
+              <TextInput
+                style={styles.amountInput}
+                value={amountText}
+                onChangeText={setAmountText}
+                keyboardType="decimal-pad"
+                selectTextOnFocus
+              />
+              {source.kind === 'weight' &&
+                (['g', 'oz'] as AmountUnit[]).map((option) => (
+                  <Pressable
+                    key={option}
+                    style={[styles.unitChip, unit === option && styles.unitChipActive]}
+                    onPress={() => switchUnit(option)}>
+                    <ThemedText type="small" themeColor={unit === option ? 'onPrimary' : 'textSecondary'}>
+                      {option}
+                    </ThemedText>
+                  </Pressable>
+                ))}
+            </View>
+          </>
+        )}
 
         <View style={styles.macroPreview}>
           <PreviewStat value={macros.calories} label="cal" emphasized />
-          <PreviewStat value={macros.proteinG} label="protein" />
-          <PreviewStat value={macros.carbsG} label="carbs" />
-          <PreviewStat value={macros.fatG} label="fat" />
+          <PreviewStat value={macros.proteinG} label="protein" unit="g" />
+          <PreviewStat value={macros.carbsG} label="carbs" unit="g" />
+          <PreviewStat value={macros.fatG} label="fat" unit="g" />
         </View>
       </ThemedView>
 
       <Pressable
-        style={[styles.primaryButton, grams <= 0 && styles.primaryButtonDisabled]}
-        disabled={grams <= 0}
-        onPress={() => onLog(Math.round(grams * 10) / 10, macros)}>
-        <GradientFill stops={Gradients.cta} />
+        style={[styles.primaryButton, !canLog && styles.primaryButtonDisabled]}
+        disabled={!canLog}
+        onPress={() =>
+          onLog({
+            grams: grams !== undefined ? Math.round(grams * 10) / 10 : undefined,
+            servings: servingsLogged,
+            macros,
+          })
+        }>
         <ThemedText type="smallBold" style={styles.primaryButtonText}>
           Log Food
         </ThemedText>
@@ -369,7 +540,6 @@ function CustomFoodPanel({
             fatG: Number(fatText) || 0,
           })
         }>
-        <GradientFill stops={Gradients.cta} />
         <ThemedText type="smallBold" style={styles.primaryButtonText}>
           Log Food
         </ThemedText>
@@ -378,32 +548,20 @@ function CustomFoodPanel({
   );
 }
 
-function RecipeRow({ recipe, onLog }: { recipe: Recipe; onLog: (servings: number) => void }) {
-  const [servings, setServings] = useState(1);
+function RecipeSearchRow({ recipe, onPress }: { recipe: Recipe; onPress: () => void }) {
   const perServing = recipePerServing(recipe);
   return (
-    <View style={styles.resultRow}>
+    <Pressable style={styles.resultRow} onPress={onPress}>
       <View style={styles.resultText}>
         <ThemedText type="smallBold" numberOfLines={1}>
           {recipe.name}
         </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
           {Math.round(perServing.calories)} cal / serving
         </ThemedText>
       </View>
-      <View style={styles.servingStepper}>
-        <Pressable hitSlop={6} onPress={() => setServings((s) => Math.max(1, s - 1))}>
-          <SymbolView name="minus.circle" size={20} tintColor={colors.textSecondary} />
-        </Pressable>
-        <ThemedText type="smallBold">{servings}</ThemedText>
-        <Pressable hitSlop={6} onPress={() => setServings((s) => s + 1)}>
-          <SymbolView name="plus.circle" size={20} tintColor={colors.textSecondary} />
-        </Pressable>
-      </View>
-      <Pressable hitSlop={8} onPress={() => onLog(servings)}>
-        <SymbolView name="plus.circle.fill" size={22} tintColor={colors.primaryLight} />
-      </Pressable>
-    </View>
+      <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+    </Pressable>
   );
 }
 
@@ -439,11 +597,22 @@ function LabeledInput({
   );
 }
 
-function PreviewStat({ value, label, emphasized }: { value: number; label: string; emphasized?: boolean }) {
+function PreviewStat({
+  value,
+  label,
+  unit,
+  emphasized,
+}: {
+  value: number;
+  label: string;
+  unit?: string;
+  emphasized?: boolean;
+}) {
   return (
     <View style={styles.previewStat}>
       <ThemedText type={emphasized ? 'stat' : 'smallBold'} style={emphasized ? styles.previewEmphasis : undefined}>
         {Math.round(value)}
+        {unit ?? ''}
       </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         {label}
@@ -520,8 +689,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
     backgroundColor: colors.surface,
     padding: Spacing.three,
   },
@@ -541,6 +708,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.one,
   },
+  slidingTrack: {
+    flexDirection: 'row',
+    height: 36,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+    overflow: 'hidden',
+  },
+  slidingIndicator: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    borderRadius: Radius.md,
+    backgroundColor: colors.primary,
+  },
+  slidingOption: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   panelContent: {
     gap: Spacing.two,
     paddingBottom: Spacing.six,
@@ -553,8 +739,7 @@ const styles = StyleSheet.create({
   },
   panelCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.two,
     marginTop: Spacing.two,
@@ -615,7 +800,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     borderRadius: Radius.md,
-    overflow: 'hidden',
+    backgroundColor: colors.primary,
     paddingVertical: Spacing.three,
     alignItems: 'center',
     marginTop: Spacing.two,

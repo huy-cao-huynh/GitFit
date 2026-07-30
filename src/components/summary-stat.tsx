@@ -1,8 +1,10 @@
+import type { SFSymbol } from 'expo-symbols';
+import { SymbolView } from 'expo-symbols';
 import { StyleSheet, View } from 'react-native';
 
 import { AnimatedNumber } from '@/components/animated-number';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Colors, Spacing } from '@/constants/theme';
 
 /**
  * Big serif value + unit over a caption. `animatedValue` counts up instead of
@@ -14,12 +16,14 @@ export function SummaryStat({
   animatedValue,
   unit,
   label,
+  icon,
   centered,
 }: {
   value?: string;
   animatedValue?: number;
   unit: string;
   label: string;
+  icon?: SFSymbol;
   centered?: boolean;
 }) {
   return (
@@ -35,9 +39,12 @@ export function SummaryStat({
           {unit ? <ThemedText type="small"> {unit}</ThemedText> : null}
         </ThemedText>
       )}
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
+      <View style={styles.labelRow}>
+        {icon ? <SymbolView name={icon} size={11} tintColor={Colors.textSecondary} /> : null}
+        <ThemedText type="small" themeColor="textSecondary">
+          {label}
+        </ThemedText>
+      </View>
     </View>
   );
 }
@@ -50,6 +57,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: Spacing.one,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
   },
   centered: {
     alignItems: 'center',

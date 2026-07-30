@@ -3,6 +3,7 @@ import Svg, {
   Defs,
   LinearGradient,
   Line,
+  Path,
   Polygon,
   Polyline,
   Stop,
@@ -21,6 +22,25 @@ interface LineChartProps {
   yFormatter?: (value: number) => string;
   /** Compact mode: no gridlines, labels, or dots — just the line + area. */
   sparkline?: boolean;
+  /** Render the line as a Catmull-Rom smoothed curve instead of straight segments. */
+  smooth?: boolean;
+}
+
+/** Catmull-Rom (tension 1/6) to cubic-bezier SVG path through every coordinate. */
+function smoothLinePath(coords: { cx: number; cy: number }[]): string {
+  let d = `M ${coords[0].cx},${coords[0].cy}`;
+  for (let i = 0; i < coords.length - 1; i += 1) {
+    const p0 = coords[i - 1] ?? coords[i];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[i + 2] ?? p2;
+    const cp1x = p1.cx + (p2.cx - p0.cx) / 6;
+    const cp1y = p1.cy + (p2.cy - p0.cy) / 6;
+    const cp2x = p2.cx - (p3.cx - p1.cx) / 6;
+    const cp2y = p2.cy - (p3.cy - p1.cy) / 6;
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.cx},${p2.cy}`;
+  }
+  return d;
 }
 
 const PADDING = { top: 10, right: 10, bottom: 20, left: 40 };
@@ -69,6 +89,7 @@ export function LineChart({
   showArea = true,
   yFormatter = defaultFormat,
   sparkline = false,
+  smooth = false,
 }: LineChartProps) {
   const padding = sparkline ? SPARK_PADDING : PADDING;
   if (points.length === 0 || width <= padding.left + padding.right) return null;
@@ -91,6 +112,10 @@ export function LineChart({
   const areaPoints = `${padding.left},${baselineY} ${polylinePoints} ${coords[coords.length - 1].cx},${baselineY}`;
   const gradientId = `area-${color.replace('#', '')}`;
   const dots = points.length <= MAX_DOTS ? coords : [coords[coords.length - 1]];
+  const linePath = smooth && coords.length > 1 ? smoothLinePath(coords) : null;
+  const areaPath = linePath
+    ? `${linePath} L ${coords[coords.length - 1].cx},${baselineY} L ${padding.left},${baselineY} Z`
+    : null;
 
   if (sparkline) {
     return (
@@ -101,15 +126,24 @@ export function LineChart({
             <Stop offset="1" stopColor={color} stopOpacity={0} />
           </LinearGradient>
         </Defs>
-        {showArea && <Polygon points={areaPoints} fill={`url(#${gradientId})`} />}
-        <Polyline
-          points={polylinePoints}
-          fill="none"
-          stroke={color}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
+        {showArea &&
+          (areaPath ? (
+            <Path d={areaPath} fill={`url(#${gradientId})`} />
+          ) : (
+            <Polygon points={areaPoints} fill={`url(#${gradientId})`} />
+          ))}
+        {linePath ? (
+          <Path d={linePath} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <Polyline
+            points={polylinePoints}
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        )}
         <Circle
           cx={coords[coords.length - 1].cx}
           cy={coords[coords.length - 1].cy}
@@ -153,15 +187,24 @@ export function LineChart({
         </SvgText>
       ))}
 
-      {showArea && <Polygon points={areaPoints} fill={`url(#${gradientId})`} />}
-      <Polyline
-        points={polylinePoints}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
+      {showArea &&
+        (areaPath ? (
+          <Path d={areaPath} fill={`url(#${gradientId})`} />
+        ) : (
+          <Polygon points={areaPoints} fill={`url(#${gradientId})`} />
+        ))}
+      {linePath ? (
+        <Path d={linePath} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <Polyline
+          points={polylinePoints}
+          fill="none"
+          stroke={color}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      )}
       {dots.map((dot, index) => (
         <Circle key={index} cx={dot.cx} cy={dot.cy} r={6} fill={Colors.surface} />
       ))}

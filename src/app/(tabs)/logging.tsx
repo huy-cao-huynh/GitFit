@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
@@ -19,22 +18,20 @@ import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { METRIC_ICONS } from '@/lib/metric-icons';
 import {
+  CALENDAR_WEEKDAY_OPTIONS,
   calendarWeekDays,
-  currentGoalValue,
+  estimateRoutineCalories,
   scheduledRoutineTasks,
   todayKey,
-  todayWaterOunces,
   unscheduledCompletedWorkouts,
+  weekdayForDate,
 } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { GoalDef, GoalMetric } from '@/lib/store/types';
-import {
-  formatVolume,
-  fromDisplayVolume,
-  toDisplayVolume,
-  volumeUnitLabel,
-} from '@/lib/units';
+import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
+import { formatWeight, fromDisplayVolume, fromDisplayWeight, toDisplayVolume, volumeUnitLabel, weightUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -50,15 +47,10 @@ const METRIC_META: Record<GoalMetric, { min: number; max: number; step: number }
   calories: { min: 100, max: 5000, step: 50 },
   cardio: { min: 0, max: 420, step: 5 },
   water: { min: 0, max: 1000, step: 8 },
+  steps: { min: 7000, max: 140000, step: 1000 },
+  bodyweight: { min: 1, max: 7, step: 1 },
   manual: { min: 1, max: 100, step: 1 },
 };
-
-const METRIC_ICONS = {
-  workouts: 'dumbbell.fill',
-  calories: 'flame.fill',
-  cardio: 'figure.run',
-  water: 'drop.fill',
-} as const;
 
 interface GoalPreset {
   metric: Exclude<GoalMetric, 'manual'>;
@@ -67,17 +59,15 @@ interface GoalPreset {
   unit: string;
 }
 
-/** The old built-in goals, offered as one-tap re-adds when missing. */
+/** The built-in goals, offered as one-tap re-adds when missing. */
 const BUILTIN_GOAL_PRESETS: GoalPreset[] = [
   { metric: 'workouts', label: 'Workouts', target: 5, unit: 'workouts' },
-  { metric: 'calories', label: 'Calories', target: 1500, unit: 'cal' },
+  { metric: 'calories', label: 'Calories Burned', target: 1500, unit: 'cal' },
   { metric: 'cardio', label: 'Cardio', target: 60, unit: 'min' },
   { metric: 'water', label: 'Water', target: 448, unit: 'oz' },
+  { metric: 'steps', label: 'Steps', target: 70000, unit: 'steps' },
+  { metric: 'bodyweight', label: 'Weigh In', target: 1, unit: 'weigh-ins' },
 ];
-
-const DEFAULT_CUSTOM_TARGET = 7;
-const WATER_QUICK_ADD_IMPERIAL = 16;
-const WATER_QUICK_ADD_METRIC = 500;
 
 export default function LoggingScreen() {
   const {
@@ -86,33 +76,27 @@ export default function LoggingScreen() {
     cardioSessions,
     goals,
     setGoals,
-    goalEntries,
-    addGoalEntry,
     checkoffDefs,
     setCheckoffDefs,
     checkoffLog,
     toggleCheckoff,
-    waterEntries,
-    addWaterEntry,
+    bodyweight,
+    addBodyweight,
     preferences,
   } = useStore();
 
   const unitSystem = preferences.unitSystem;
+  const scrollRef = useResetScrollOnFocus<ScrollView>();
   const today = todayKey();
   const doneToday = checkoffLog[today] ?? [];
   const [selectedDate, setSelectedDate] = useState(today);
 
-  const waterGoal = goals.find((goal) => goal.metric === 'water');
-  const todayWater = todayWaterOunces(waterEntries);
-
   const [newCheckoff, setNewCheckoff] = useState('');
-  const [newGoalLabel, setNewGoalLabel] = useState('');
-  const [newGoalUnit, setNewGoalUnit] = useState('');
+  const [weightInput, setWeightInput] = useState('');
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   const [editingGoalValue, setEditingGoalValue] = useState('');
   const [renamingGoalId, setRenamingGoalId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [customWater, setCustomWater] = useState('');
   const selectedDateObject = selectedDateFromKey(selectedDate);
   const selectedDateLabel = selectedDateObject.toLocaleDateString(undefined, {
     weekday: 'long',
@@ -122,6 +106,9 @@ export default function LoggingScreen() {
   const calendarDays = calendarWeekDays(routines, sessions, cardioSessions, selectedDateObject);
   const selectedTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, selectedDate);
   const extraCompletedWorkouts = unscheduledCompletedWorkouts(routines, sessions, cardioSessions, selectedDate);
+  const visibleGoals = goals.filter(
+    (goal): goal is GoalDef & { metric: Exclude<GoalMetric, 'manual'> } => goal.metric !== 'manual',
+  );
   const missingPresets = BUILTIN_GOAL_PRESETS.filter(
     (preset) => !goals.some((goal) => goal.metric === preset.metric),
   );
@@ -169,38 +156,19 @@ export default function LoggingScreen() {
     setRenamingGoalId(null);
   };
 
-  const addCustomGoal = () => {
-    const label = newGoalLabel.trim();
-    if (!label) return;
-    setGoals([
-      ...goals,
-      { id: makeId(), metric: 'manual', label, target: DEFAULT_CUSTOM_TARGET, unit: newGoalUnit.trim() },
-    ]);
-    setNewGoalLabel('');
-    setNewGoalUnit('');
-  };
-
   const addPresetGoal = (preset: GoalPreset) => {
     setGoals([...goals, { id: makeId(), ...preset }]);
   };
 
-  const checkInGoal = (goal: GoalDef) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    addGoalEntry({ id: makeId(), goalId: goal.id, date: today, amount: 1 });
-  };
+  const weighInGoal = goals.find((goal) => goal.metric === 'bodyweight');
+  const showWeighInTask = !!weighInGoal && weekdayForDate(selectedDateObject) === weighInGoal.target;
+  const weightForSelectedDate = bodyweight.find((entry) => entry.date === selectedDate);
 
-  const addWater = (displayAmount: number) => {
-    let deltaOunces = Math.round(fromDisplayVolume(displayAmount, unitSystem));
-    if (deltaOunces < 0) deltaOunces = Math.max(deltaOunces, -todayWater);
-    if (deltaOunces === 0) return;
-    addWaterEntry({ id: makeId(), date: today, ounces: deltaOunces });
-  };
-
-  const addCustomWater = (sign: 1 | -1) => {
-    const value = Number(customWater);
-    if (!Number.isFinite(value) || value <= 0) return;
-    addWater(sign * value);
-    setCustomWater('');
+  const saveWeight = () => {
+    const displayValue = Number(weightInput);
+    if (!Number.isFinite(displayValue) || displayValue <= 0) return;
+    addBodyweight({ date: selectedDate, weight: fromDisplayWeight(displayValue, unitSystem) });
+    setWeightInput('');
   };
 
   return (
@@ -208,15 +176,15 @@ export default function LoggingScreen() {
       <ScreenBackground>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.scrollWrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView style={styles.scrollWrap} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView ref={scrollRef} style={styles.scrollWrap} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
-              <ThemedText type="subtitle">Goals & Logging</ThemedText>
+              <ThemedText type="subtitle">Goals</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
                 Track your daily goals and progress.
               </ThemedText>
             </View>
 
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" style={styles.sectionLabel}>
               CALENDAR
             </ThemedText>
             <ThemedView type="surface" style={styles.calendarCard}>
@@ -224,34 +192,37 @@ export default function LoggingScreen() {
                 {calendarDays.map((day) => {
                   const selected = day.date === selectedDate;
                   const complete = day.completedCount > 0 && day.completedCount >= day.scheduledCount;
-                  const todo = day.scheduledCount > 0 && !complete;
-                  const missed = todo && day.date < today;
+                  // Past days all read the same regardless of what happened —
+                  // the green dot is the only signal of a completed workout.
+                  const isPast = !day.isToday && day.date < today;
+                  const isFuture = !day.isToday && !isPast;
                   return (
                     <Pressable key={day.date} style={styles.calendarDay} onPress={() => setSelectedDate(day.date)}>
-                      <View style={styles.weekdayMarkerSlot}>
-                        <View style={[styles.todayMarker, !day.isToday && styles.todayMarkerHidden]} />
-                        <ThemedText type="small" themeColor={day.isToday ? 'text' : 'textSecondary'}>
+                      <View
+                        style={[
+                          styles.calendarCell,
+                          isPast && styles.calendarCellPast,
+                          isFuture && styles.calendarCellFuture,
+                          day.isToday && styles.calendarCellToday,
+                          selected && styles.calendarCellSelected,
+                        ]}>
+                        <ThemedText
+                          type="statInline"
+                          style={[day.isToday && styles.calendarNumberToday, isPast && styles.calendarNumberPast]}>
+                          {day.dayNumber}
+                        </ThemedText>
+                        <ThemedText
+                          type="caption"
+                          themeColor={day.isToday ? 'onPrimaryDim' : isPast ? 'textMuted' : 'textSecondary'}>
                           {day.label}
                         </ThemedText>
-                      </View>
-                      <View style={styles.calendarBubbleSlot}>
                         <View
                           style={[
-                            styles.calendarBubble,
-                            complete && styles.calendarBubbleDone,
-                            todo && !missed && styles.calendarBubbleTodo,
-                            missed && styles.calendarBubbleMissed,
-                            selected && styles.calendarBubbleSelected,
-                          ]}>
-                          <ThemedText
-                            type="smallBold"
-                            style={[
-                              complete && styles.calendarNumberDone,
-                              missed && styles.calendarNumberMissed,
-                            ]}>
-                            {day.dayNumber}
-                          </ThemedText>
-                        </View>
+                            styles.completedDot,
+                            day.isToday && styles.completedDotOnToday,
+                            !complete && styles.completedDotHidden,
+                          ]}
+                        />
                       </View>
                     </Pressable>
                   );
@@ -266,14 +237,19 @@ export default function LoggingScreen() {
                 </ThemedText>
               </View>
 
-              {selectedTasks.length === 0 && extraCompletedWorkouts.length === 0 ? (
+              {selectedTasks.length === 0 && extraCompletedWorkouts.length === 0 && !showWeighInTask ? (
                 <ThemedText type="small" themeColor="textSecondary">
                   No workouts scheduled for this day.
                 </ThemedText>
               ) : (
-                <>
+                <View style={styles.workoutPreviewCard}>
                   {selectedTasks.map((task) => {
                     const incomplete = !task.completed && selectedDate < today;
+                    const statusLabel = task.completed ? 'Completed' : incomplete ? 'Incomplete' : 'TODO';
+                    // TODO and Incomplete both mean "not done yet" — only timing
+                    // differs — so they share the same orange treatment.
+                    const statusStyle = task.completed ? styles.statusPillCompleted : styles.statusPillIncomplete;
+                    const statusTextColor = task.completed ? colors.primaryLight : colors.warning;
                     const path =
                       task.routine.category === 'cardio'
                         ? { pathname: '/cardio/[id]' as const, params: { id: task.routine.id } }
@@ -286,11 +262,25 @@ export default function LoggingScreen() {
                         disabled={task.completed}>
                         <View style={styles.flex}>
                           <ThemedText type="smallBold">{task.routine.name}</ThemedText>
-                          <ThemedText type="small" themeColor="textSecondary">
-                            {task.completed
-                              ? 'Completed'
-                              : `${incomplete ? 'Incomplete' : 'TODO'} · ${task.routine.durationMinutes} min`}
-                          </ThemedText>
+                          <View style={styles.workoutMetaRow}>
+                            <View style={[styles.statusPill, statusStyle]}>
+                              <ThemedText type="caption" style={{ color: statusTextColor }}>
+                                {statusLabel}
+                              </ThemedText>
+                            </View>
+                            <View style={styles.metaItem}>
+                              <SymbolView name="timer" size={11} tintColor={colors.textSecondary} />
+                              <ThemedText type="small" themeColor="textSecondary">
+                                {task.routine.durationMinutes} min
+                              </ThemedText>
+                            </View>
+                            <View style={styles.metaItem}>
+                              <SymbolView name="flame.fill" size={11} tintColor={colors.textSecondary} />
+                              <ThemedText type="small" themeColor="textSecondary">
+                                ~{estimateRoutineCalories(task.routine)} cal
+                              </ThemedText>
+                            </View>
+                          </View>
                         </View>
                         {!task.completed && <SymbolView name="chevron.right" size={12} tintColor={colors.textSecondary} />}
                       </Pressable>
@@ -300,39 +290,150 @@ export default function LoggingScreen() {
                     <View key={workout.id} style={styles.scheduledRow}>
                       <View style={styles.flex}>
                         <ThemedText type="smallBold">{workout.name}</ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {`Completed · ${workout.minutes} min`}
-                        </ThemedText>
+                        <View style={styles.workoutMetaRow}>
+                          <View style={[styles.statusPill, styles.statusPillCompleted]}>
+                            <ThemedText type="caption" style={{ color: colors.primaryLight }}>
+                              Completed
+                            </ThemedText>
+                          </View>
+                          <View style={styles.metaItem}>
+                            <SymbolView name="timer" size={11} tintColor={colors.textSecondary} />
+                            <ThemedText type="small" themeColor="textSecondary">
+                              {workout.minutes} min
+                            </ThemedText>
+                          </View>
+                          <View style={styles.metaItem}>
+                            <SymbolView name="flame.fill" size={11} tintColor={colors.textSecondary} />
+                            <ThemedText type="small" themeColor="textSecondary">
+                              {workout.calories} cal
+                            </ThemedText>
+                          </View>
+                        </View>
                       </View>
                     </View>
                   ))}
-                </>
+                  {showWeighInTask &&
+                    (() => {
+                      const weighInCompleted = !!weightForSelectedDate;
+                      const weighInIncomplete = !weighInCompleted && selectedDate < today;
+                      // Same TODO/Completed/Incomplete convention as scheduled routine tasks above.
+                      const weighInStatusLabel = weighInCompleted ? 'Completed' : weighInIncomplete ? 'Incomplete' : 'TODO';
+                      const weighInStatusStyle = weighInCompleted ? styles.statusPillCompleted : styles.statusPillIncomplete;
+                      const weighInStatusTextColor = weighInCompleted ? colors.primaryLight : colors.warning;
+                      return (
+                        <View style={styles.scheduledRow}>
+                          <View style={styles.flex}>
+                            <ThemedText type="smallBold">Weigh In</ThemedText>
+                            <View style={styles.workoutMetaRow}>
+                              <View style={[styles.statusPill, weighInStatusStyle]}>
+                                <ThemedText type="caption" style={{ color: weighInStatusTextColor }}>
+                                  {weighInStatusLabel}
+                                </ThemedText>
+                              </View>
+                              {weightForSelectedDate && (
+                                <ThemedText type="small" themeColor="textSecondary">
+                                  {formatWeight(weightForSelectedDate.weight, unitSystem)}
+                                </ThemedText>
+                              )}
+                            </View>
+                            {!weighInCompleted && (
+                              <View style={[styles.inputRow, styles.weighInInputRow]}>
+                                <TextInput
+                                  style={[styles.textInput, styles.flex]}
+                                  placeholder={`Log weight (${weightUnitLabel(unitSystem)})`}
+                                  placeholderTextColor={colors.textSecondary}
+                                  value={weightInput}
+                                  onChangeText={setWeightInput}
+                                  keyboardType="decimal-pad"
+                                  onSubmitEditing={saveWeight}
+                                  returnKeyType="done"
+                                />
+                                <IconButton
+                                  icon="checkmark.circle.fill"
+                                  active={!!weightInput.trim()}
+                                  onPress={saveWeight}
+                                />
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })()}
+                </View>
               )}
             </ThemedView>
 
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" style={styles.sectionLabel}>
               WEEKLY GOALS
             </ThemedText>
             <ThemedView type="surface" style={styles.card}>
-              {goals.map((goal, index) => {
+              {visibleGoals.map((goal, index) => {
+                if (goal.metric === 'bodyweight') {
+                  return (
+                    <View key={goal.id} style={[styles.goalRowColumn, index > 0 && styles.rowDivider]}>
+                      <View style={styles.goalRowTop}>
+                        <View style={styles.goalIcon}>
+                          <SymbolView name={METRIC_ICONS.bodyweight} size={14} tintColor={colors.primaryLight} />
+                        </View>
+                        <View style={styles.goalLabelWrap}>
+                          {renamingGoalId === goal.id ? (
+                            <TextInput
+                              style={styles.goalLabelInput}
+                              value={renameValue}
+                              onChangeText={setRenameValue}
+                              onSubmitEditing={() => commitRename(goal)}
+                              onBlur={() => commitRename(goal)}
+                              autoFocus
+                              selectTextOnFocus
+                              returnKeyType="done"
+                            />
+                          ) : (
+                            <Pressable hitSlop={4} onPress={() => startRenaming(goal)}>
+                              <ThemedText type="small" numberOfLines={1}>
+                                {goal.label}
+                              </ThemedText>
+                            </Pressable>
+                          )}
+                        </View>
+                        <Pressable
+                          hitSlop={8}
+                          onPress={() => setGoals(goals.filter((existing) => existing.id !== goal.id))}>
+                          <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
+                        </Pressable>
+                      </View>
+                      <View style={styles.weekdayChipRow}>
+                        {CALENDAR_WEEKDAY_OPTIONS.map((day) => {
+                          const active = goal.target === day.value;
+                          return (
+                            <Pressable
+                              key={day.value}
+                              style={[styles.weekdayChip, active && styles.weekdayChipActive]}
+                              onPress={() =>
+                                setGoals(
+                                  goals.map((existing) =>
+                                    existing.id === goal.id ? { ...existing, target: day.value } : existing,
+                                  ),
+                                )
+                              }>
+                              <ThemedText type="caption" themeColor={active ? 'onPrimary' : 'textSecondary'}>
+                                {day.short}
+                              </ThemedText>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                }
+
                 const displayTarget = displayTargetFor(goal);
                 const unitLabel =
                   goal.metric === 'water' ? volumeUnitLabel(unitSystem) : goal.unit || '/ week';
-                const weekValue =
-                  goal.metric === 'manual'
-                    ? currentGoalValue(goal, sessions, cardioSessions, waterEntries, goalEntries)
-                    : null;
                 return (
                   <View key={goal.id} style={[styles.goalRow, index > 0 && styles.rowDivider]}>
-                    {goal.metric === 'manual' ? (
-                      <Pressable style={styles.goalCheckin} hitSlop={6} onPress={() => checkInGoal(goal)}>
-                        <SymbolView name="plus" size={14} tintColor={colors.onPrimary} />
-                      </Pressable>
-                    ) : (
-                      <View style={styles.goalIcon}>
-                        <SymbolView name={METRIC_ICONS[goal.metric]} size={14} tintColor={colors.primaryLight} />
-                      </View>
-                    )}
+                    <View style={styles.goalIcon}>
+                      <SymbolView name={METRIC_ICONS[goal.metric]} size={14} tintColor={colors.primaryLight} />
+                    </View>
                     <View style={styles.goalLabelWrap}>
                       {renamingGoalId === goal.id ? (
                         <TextInput
@@ -352,48 +453,43 @@ export default function LoggingScreen() {
                           </ThemedText>
                         </Pressable>
                       )}
-                      {weekValue !== null && (
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {weekValue} this week
-                        </ThemedText>
-                      )}
                     </View>
                     <View style={styles.goalControls}>
-                      <Pressable
-                        hitSlop={6}
-                        style={styles.stepperButton}
-                        onPress={() => setGoalTarget(goal, displayTarget - METRIC_META[goal.metric].step)}>
-                        <SymbolView name="minus" size={12} tintColor={colors.text} />
-                      </Pressable>
-                      {editingGoalId === goal.id ? (
-                        <TextInput
-                          style={styles.goalValueInput}
-                          keyboardType="number-pad"
-                          value={editingGoalValue}
-                          onChangeText={setEditingGoalValue}
-                          onSubmitEditing={() => commitEditingTarget(goal)}
-                          onBlur={() => commitEditingTarget(goal)}
-                          autoFocus
-                          selectTextOnFocus
-                          returnKeyType="done"
-                        />
-                      ) : (
-                        <Pressable hitSlop={6} onPress={() => startEditingTarget(goal)}>
-                          <ThemedText type="smallBold" style={styles.goalValue}>
-                            {displayTarget}
-                            <ThemedText type="small" themeColor="textSecondary">
-                              {' '}
-                              {unitLabel}
-                            </ThemedText>
-                          </ThemedText>
+                      <View style={styles.stepperPill}>
+                        <Pressable
+                          hitSlop={6}
+                          onPress={() => setGoalTarget(goal, displayTarget - METRIC_META[goal.metric].step)}>
+                          <SymbolView name="minus" size={12} tintColor={colors.primaryLight} />
                         </Pressable>
-                      )}
-                      <Pressable
-                        hitSlop={6}
-                        style={styles.stepperButton}
-                        onPress={() => setGoalTarget(goal, displayTarget + METRIC_META[goal.metric].step)}>
-                        <SymbolView name="plus" size={12} tintColor={colors.text} />
-                      </Pressable>
+                        {editingGoalId === goal.id ? (
+                          <TextInput
+                            style={styles.goalValueInput}
+                            keyboardType="number-pad"
+                            value={editingGoalValue}
+                            onChangeText={setEditingGoalValue}
+                            onSubmitEditing={() => commitEditingTarget(goal)}
+                            onBlur={() => commitEditingTarget(goal)}
+                            autoFocus
+                            selectTextOnFocus
+                            returnKeyType="done"
+                          />
+                        ) : (
+                          <Pressable hitSlop={6} onPress={() => startEditingTarget(goal)}>
+                            <ThemedText type="smallBold" style={styles.goalValue}>
+                              {displayTarget}
+                              <ThemedText type="small" themeColor="textSecondary">
+                                {' '}
+                                {unitLabel}
+                              </ThemedText>
+                            </ThemedText>
+                          </Pressable>
+                        )}
+                        <Pressable
+                          hitSlop={6}
+                          onPress={() => setGoalTarget(goal, displayTarget + METRIC_META[goal.metric].step)}>
+                          <SymbolView name="plus" size={12} tintColor={colors.primaryLight} />
+                        </Pressable>
+                      </View>
                       <Pressable
                         hitSlop={8}
                         onPress={() => setGoals(goals.filter((existing) => existing.id !== goal.id))}>
@@ -404,30 +500,8 @@ export default function LoggingScreen() {
                 );
               })}
 
-              <View style={[styles.inputRow, goals.length > 0 && styles.rowDivider]}>
-                <TextInput
-                  style={[styles.textInput, styles.flex]}
-                  placeholder="Add a custom goal (e.g. Stretch)"
-                  placeholderTextColor={colors.textSecondary}
-                  value={newGoalLabel}
-                  onChangeText={setNewGoalLabel}
-                  onSubmitEditing={addCustomGoal}
-                  returnKeyType="done"
-                />
-                <TextInput
-                  style={[styles.textInput, styles.unitInput]}
-                  placeholder="Unit"
-                  placeholderTextColor={colors.textSecondary}
-                  value={newGoalUnit}
-                  onChangeText={setNewGoalUnit}
-                  onSubmitEditing={addCustomGoal}
-                  returnKeyType="done"
-                />
-                <IconButton icon="plus.circle.fill" active={!!newGoalLabel.trim()} onPress={addCustomGoal} />
-              </View>
-
               {missingPresets.length > 0 && (
-                <View style={[styles.suggestionRow, styles.rowDivider]}>
+                <View style={[styles.suggestionRow, visibleGoals.length > 0 && styles.rowDivider]}>
                   {missingPresets.map((preset) => (
                     <Pressable key={preset.metric} style={styles.suggestionChip} onPress={() => addPresetGoal(preset)}>
                       <SymbolView name="plus" size={10} tintColor={colors.primaryLight} />
@@ -440,8 +514,8 @@ export default function LoggingScreen() {
               )}
             </ThemedView>
 
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-              TODAY
+            <ThemedText type="label" style={styles.sectionLabel}>
+              DAILY GOALS
             </ThemedText>
             <ThemedView type="surface" style={styles.card}>
               {checkoffDefs.map((def, index) => {
@@ -482,47 +556,6 @@ export default function LoggingScreen() {
                 <IconButton icon="plus.circle.fill" active={!!newCheckoff.trim()} onPress={addCheckoff} />
               </View>
             </ThemedView>
-
-            {waterGoal && (
-              <>
-                <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-                  WATER
-                </ThemedText>
-                <ThemedView type="surface" style={styles.card}>
-                  <View style={styles.waterRow}>
-                    <ThemedText type="subtitle">{formatVolume(todayWater, unitSystem)}</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      today
-                    </ThemedText>
-                  </View>
-                  <Pressable
-                    style={styles.quickAddButton}
-                    onPress={() => addWater(unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL)}>
-                    <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-                      +{unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL} {volumeUnitLabel(unitSystem)}
-                    </ThemedText>
-                  </Pressable>
-                  <View style={[styles.splitRow, styles.rowDivider, styles.waterCustomRow]}>
-                    <TextInput
-                      style={[styles.textInput, styles.flex]}
-                      placeholder={`Custom amount (${volumeUnitLabel(unitSystem)})`}
-                      placeholderTextColor={colors.textSecondary}
-                      value={customWater}
-                      onChangeText={setCustomWater}
-                      keyboardType="decimal-pad"
-                    />
-                    <Pressable hitSlop={8} onPress={() => addCustomWater(-1)} disabled={!customWater.trim()}>
-                      <SymbolView
-                        name="minus.circle.fill"
-                        size={24}
-                        tintColor={customWater.trim() ? colors.textSecondary : colors.textMuted}
-                      />
-                    </Pressable>
-                    <IconButton icon="plus.circle.fill" active={!!customWater.trim()} onPress={() => addCustomWater(1)} />
-                  </View>
-                </ThemedView>
-              </>
-            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -566,14 +599,12 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: Spacing.three,
   },
   calendarCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.three,
   },
@@ -583,70 +614,87 @@ const styles = StyleSheet.create({
   },
   calendarDay: {
     alignItems: 'center',
-    gap: Spacing.two,
   },
-  weekdayMarkerSlot: {
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.half,
-  },
-  todayMarker: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.primaryLight,
-  },
-  todayMarkerHidden: {
-    opacity: 0,
-  },
-  calendarBubbleSlot: {
+  calendarCell: {
     width: 44,
-    height: 44,
+    minHeight: 60,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.half,
+    paddingVertical: Spacing.two,
   },
-  calendarBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
+  calendarCellFuture: {
+    backgroundColor: colors.surfaceElevated,
   },
-  calendarBubbleSelected: {
+  calendarCellSelected: {
     borderWidth: 2,
     borderColor: colors.primaryLight,
   },
-  calendarBubbleDone: {
+  calendarCellToday: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
-  },
-  calendarBubbleTodo: {
     borderWidth: 2,
-    borderColor: colors.textSecondary,
   },
-  calendarBubbleMissed: {
+  calendarCellPast: {
     backgroundColor: colors.surfaceElevated,
-    borderWidth: 2,
-    borderColor: colors.border,
   },
-  calendarNumberDone: {
+  calendarNumberToday: {
     color: colors.onPrimary,
   },
-  calendarNumberMissed: {
-    color: colors.textSecondary,
+  calendarNumberPast: {
+    color: colors.textMuted,
+  },
+  completedDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+  },
+  completedDotOnToday: {
+    backgroundColor: colors.onPrimary,
+  },
+  completedDotHidden: {
+    opacity: 0,
   },
   selectedDayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  workoutPreviewCard: {
+    borderRadius: Radius.lg,
+    backgroundColor: colors.surfaceElevated,
+    padding: Spacing.three,
+    gap: Spacing.three,
+  },
   scheduledRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
+  },
+  workoutMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+  },
+  statusPill: {
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+  },
+  statusPillCompleted: {
+    backgroundColor: colors.primaryTint,
+  },
+  statusPillIncomplete: {
+    backgroundColor: 'rgba(245,165,36,0.14)',
   },
   goalRow: {
     flexDirection: 'row',
@@ -654,19 +702,40 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     gap: Spacing.two,
   },
+  goalRowColumn: {
+    paddingVertical: Spacing.three,
+    gap: Spacing.three,
+  },
+  goalRowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  weekdayChipRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.one,
+  },
+  weekdayChip: {
+    flex: 1,
+    height: 28,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceElevated,
+  },
+  weekdayChipActive: {
+    backgroundColor: colors.primary,
+  },
+  weighInInputRow: {
+    paddingVertical: 0,
+    marginTop: Spacing.two,
+  },
   goalIcon: {
     width: 28,
     height: 28,
     borderRadius: 14,
     backgroundColor: colors.primaryTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  goalCheckin: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -701,13 +770,14 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
   },
-  stepperButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceElevated,
+  stepperPill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: Spacing.one,
+    borderRadius: Radius.full,
+    backgroundColor: colors.primaryTint,
+    paddingVertical: Spacing.half,
+    paddingHorizontal: Spacing.two,
   },
   suggestionRow: {
     flexDirection: 'row',
@@ -723,8 +793,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two + Spacing.one,
     borderRadius: Radius.full,
     backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   rowDivider: {
     borderTopWidth: 1,
@@ -756,30 +824,5 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.surfaceElevated,
     fontSize: 14,
-  },
-  waterRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: Spacing.two,
-    paddingTop: Spacing.three,
-  },
-  waterCustomRow: {
-    paddingVertical: Spacing.three,
-  },
-  quickAddButton: {
-    alignItems: 'center',
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.md,
-    backgroundColor: colors.surfaceElevated,
-    marginTop: Spacing.two,
-    marginBottom: Spacing.three,
-  },
-  splitRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    alignItems: 'center',
-  },
-  unitInput: {
-    width: 72,
   },
 });

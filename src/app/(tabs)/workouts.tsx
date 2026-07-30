@@ -7,14 +7,16 @@ import { SymbolView } from 'expo-symbols';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { Chevron } from '@/components/chevron';
-import { GradientFill } from '@/components/gradient-fill';
+import { MuscleCoverageBar } from '@/components/muscle-coverage-bar';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Colors, Gradients, Motion, Radius, Spacing } from '@/constants/theme';
-import { routineScheduleLabel } from '@/lib/store/derive';
+import { BottomTabInset, Colors, Motion, Radius, Spacing } from '@/constants/theme';
+import { ACTIVITY_ICONS } from '@/lib/activity-icons';
+import { muscleCoverageThisWeek, routineScheduleLabel } from '@/lib/store/derive';
 import type { Routine, WorkoutCategory } from '@/lib/store/types';
+import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { formatDistance } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
@@ -23,10 +25,12 @@ const colors = Colors;
 const CATEGORY_LABELS: Record<WorkoutCategory, string> = { strength: 'Strength', cardio: 'Cardio' };
 
 export default function WorkoutsScreen() {
-  const { routines, preferences } = useStore();
+  const { routines, sessions, preferences } = useStore();
   const [category, setCategory] = useState<WorkoutCategory>('strength');
   const [segmentedWidth, setSegmentedWidth] = useState(0);
   const filtered = routines.filter((routine) => routine.category === category);
+  const listRef = useResetScrollOnFocus<FlatList<Routine>>();
+  const muscleHit = muscleCoverageThisWeek(sessions);
 
   const segmentWidth = segmentedWidth > 0 ? (segmentedWidth - Spacing.half * 2) / 2 : 0;
   const position = useSharedValue(category === 'strength' ? 0 : 1);
@@ -41,8 +45,9 @@ export default function WorkoutsScreen() {
     <TabFadeView style={styles.container}>
       <ScreenBackground>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedText type="subtitle" style={styles.title}>
-          Workouts
+        <ThemedText type="subtitle">Workouts</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.title}>
+          Build your routines and track your training
         </ThemedText>
 
         <View style={styles.segmented} onLayout={(e) => setSegmentedWidth(e.nativeEvent.layout.width)}>
@@ -61,7 +66,14 @@ export default function WorkoutsScreen() {
           })}
         </View>
 
+        {category === 'strength' && (
+          <View style={styles.coverageBar}>
+            <MuscleCoverageBar hit={muscleHit} />
+          </View>
+        )}
+
         <FlatList
+          ref={listRef}
           data={filtered}
           keyExtractor={(routine) => routine.id}
           contentContainerStyle={styles.list}
@@ -112,9 +124,8 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
     <Pressable onPress={goToEdit}>
       <ThemedView type="surface" style={styles.routineCard}>
         <View style={styles.routineIcon}>
-          <GradientFill stops={Gradients.cardAccent} angle={135} />
           <SymbolView
-            name={isCardio ? 'figure.run' : 'dumbbell'}
+            name={isCardio ? ACTIVITY_ICONS[routine.activityType ?? 'other'] : 'dumbbell'}
             size={22}
             tintColor={colors.primaryLight}
           />
@@ -129,7 +140,6 @@ function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'im
           </ThemedText>
         </View>
         <Pressable hitSlop={8} style={styles.playButton} onPress={goToPlay}>
-          <GradientFill stops={Gradients.cta} />
           <Svg width={12} height={14} viewBox="0 0 14 16">
             <Path d="M0 0l14 8-14 8z" fill={colors.onPrimary} />
           </Svg>
@@ -158,6 +168,9 @@ const styles = StyleSheet.create({
   title: {
     marginBottom: Spacing.three,
   },
+  coverageBar: {
+    marginBottom: Spacing.three,
+  },
   segmented: {
     flexDirection: 'row',
     borderRadius: Radius.md,
@@ -184,8 +197,7 @@ const styles = StyleSheet.create({
   },
   routineCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -195,11 +207,9 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: Radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.primaryTint,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   routineText: {
     flex: 1,
@@ -208,8 +218,8 @@ const styles = StyleSheet.create({
   playButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    overflow: 'hidden',
+    borderRadius: Radius.full,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 2,

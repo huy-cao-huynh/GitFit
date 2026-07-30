@@ -2,15 +2,17 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SymbolView } from 'expo-symbols';
 
 import { ActivityRings } from '@/components/activity-rings';
-import { GradientFill } from '@/components/gradient-fill';
 import { SummaryStat } from '@/components/summary-stat';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TimerText } from '@/components/timer-text';
 import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
-import { currentGoalValue, estimateCardioCalories, todayKey } from '@/lib/store/derive';
+import { ACTIVITY_ICONS } from '@/lib/activity-icons';
+import { haptics } from '@/lib/haptics';
+import { cardioRoutinePR, currentGoalValue, estimateCardioCalories, lastCardioPerformance, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { CardioSession } from '@/lib/store/types';
 import { distanceUnitLabel, fromDisplayDistance, toDisplayDistance } from '@/lib/units';
@@ -22,7 +24,7 @@ type Phase = 'idle' | 'active' | 'enteringDistance' | 'finished';
 
 export default function CardioSessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { routines, sessions, cardioSessions, goals, goalEntries, waterEntries, addCardioSession, preferences } =
+  const { routines, sessions, cardioSessions, goals, goalEntries, waterEntries, steps, addCardioSession, preferences } =
     useStore();
   const unitSystem = preferences.unitSystem;
   const routine = routines.find((r) => r.id === id && r.category === 'cardio');
@@ -47,7 +49,6 @@ export default function CardioSessionScreen() {
         <SafeAreaView style={styles.safeArea}>
           <ThemedText type="subtitle">Workout not found</ThemedText>
           <Pressable style={styles.primaryButton} onPress={() => router.back()}>
-            <GradientFill />
             <ThemedText style={styles.primaryButtonText}>Back</ThemedText>
           </Pressable>
         </SafeAreaView>
@@ -56,14 +57,16 @@ export default function CardioSessionScreen() {
   }
 
   const start = () => {
+    haptics.impact();
     setStartedAt(Date.now());
     setPhase('active');
   };
 
   const requestEnd = () => {
-    Alert.alert('End workout?', 'Your time will be saved.', [
+    Alert.alert('End workout early?', 'Save what you’ve done, or discard the whole session.', [
       { text: 'Keep going', style: 'cancel' },
-      { text: 'End workout', style: 'destructive', onPress: () => setPhase('enteringDistance') },
+      { text: 'Save & finish', onPress: () => setPhase('enteringDistance') },
+      { text: 'Discard workout', style: 'destructive', onPress: () => router.dismissTo('/dashboard') },
     ]);
   };
 
@@ -104,11 +107,15 @@ export default function CardioSessionScreen() {
             size={220}
             strokeWidth={15}
             gap={6}
-            rings={goals.map((goal, index) => ({
-              progress: currentGoalValue(goal, sessions, updatedCardioSessions, waterEntries, goalEntries) / goal.target,
-              color: RingColors[index % RingColors.length],
-              trackColor: colors.border,
-            }))}
+            rings={goals
+              .filter((goal) => goal.metric !== 'bodyweight')
+              .map((goal, index) => ({
+                progress:
+                  currentGoalValue(goal, sessions, updatedCardioSessions, waterEntries, goalEntries, steps) /
+                  goal.target,
+                color: RingColors[index % RingColors.length],
+                trackColor: colors.border,
+              }))}
           />
 
           <View style={styles.summaryRow}>
@@ -125,7 +132,6 @@ export default function CardioSessionScreen() {
           </View>
 
           <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
-            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Return to Home
             </ThemedText>
@@ -158,7 +164,6 @@ export default function CardioSessionScreen() {
           </ThemedView>
 
           <Pressable style={styles.primaryButton} onPress={saveSession}>
-            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Save Workout
             </ThemedText>
@@ -184,12 +189,12 @@ export default function CardioSessionScreen() {
           </View>
 
           <View style={styles.timerArea}>
-            <ThemedText type="label" themeColor="textSecondary">
+            <ThemedText type="label">
               ELAPSED
             </ThemedText>
             {/* The only DSEG7 on this screen — it's a live clock. The target
                 below it is a stat, so it reads in the serif numeral face. */}
-            <TimerText seconds={elapsedSec} ticking />
+            <TimerText seconds={elapsedSec} />
             {routine.targetDistanceMiles ? (
               <ThemedText type="small" themeColor="textSecondary">
                 Target:{' '}
@@ -201,7 +206,6 @@ export default function CardioSessionScreen() {
           </View>
 
           <Pressable style={styles.primaryButton} onPress={requestEnd}>
-            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               End Workout
             </ThemedText>
@@ -211,10 +215,14 @@ export default function CardioSessionScreen() {
     );
   }
 
+  const lastTime = lastCardioPerformance(cardioSessions, routine.id);
+  const pr = cardioRoutinePR(cardioSessions, routine.id);
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.topRow}>
+          <SymbolView name={ACTIVITY_ICONS[routine.activityType ?? 'other']} size={16} tintColor={colors.primaryLight} />
           <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
             {routine.name}
           </ThemedText>
@@ -228,7 +236,7 @@ export default function CardioSessionScreen() {
         <ScrollView style={styles.flex} contentContainerStyle={styles.overviewContent}>
           <ThemedView type="surface" style={styles.targetCard}>
             <View style={styles.targetColumn}>
-              <ThemedText type="title" style={styles.targetValue}>
+              <ThemedText type="statLarge" style={styles.targetValue}>
                 {routine.durationMinutes}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
@@ -239,7 +247,7 @@ export default function CardioSessionScreen() {
               <>
                 <View style={styles.targetDivider} />
                 <View style={styles.targetColumn}>
-                  <ThemedText type="title" style={styles.targetValue}>
+                  <ThemedText type="statLarge" style={styles.targetValue}>
                     {toDisplayDistance(routine.targetDistanceMiles, unitSystem)}
                     <ThemedText type="small" style={{ color: colors.primaryLight }}>
                       {' '}
@@ -253,10 +261,27 @@ export default function CardioSessionScreen() {
               </>
             ) : null}
           </ThemedView>
+
+          {lastTime ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.captionRow}>
+              Last time:{' '}
+              <ThemedText type="statInline">
+                {lastTime.minutes} min
+                {lastTime.distanceMiles ? ` · ${toDisplayDistance(lastTime.distanceMiles, unitSystem)} ${distanceUnitLabel(unitSystem)}` : ''}
+              </ThemedText>
+            </ThemedText>
+          ) : null}
+          {pr ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.captionRow}>
+              Best distance:{' '}
+              <ThemedText type="statInline" themeColor="primary">
+                {toDisplayDistance(pr.distanceMiles, unitSystem)} {distanceUnitLabel(unitSystem)}
+              </ThemedText>
+            </ThemedText>
+          ) : null}
         </ScrollView>
 
         <Pressable style={styles.primaryButton} onPress={start}>
-          <GradientFill />
           <ThemedText type="smallBold" style={styles.primaryButtonText}>
             Start
           </ThemedText>
@@ -292,14 +317,14 @@ const styles = StyleSheet.create({
   overviewContent: {
     flexGrow: 1,
     justifyContent: 'center',
+    gap: Spacing.two,
   },
   exerciseHeader: {
     gap: Spacing.half,
   },
   targetCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.four,
     flexDirection: 'row',
     gap: Spacing.four,
@@ -309,13 +334,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   targetValue: {
-    fontSize: 36,
-    lineHeight: 40,
     color: colors.primaryLight,
   },
   targetDivider: {
     width: 1,
     backgroundColor: colors.border,
+  },
+  captionRow: {
+    textAlign: 'center',
   },
   timerArea: {
     flex: 1,
@@ -325,8 +351,7 @@ const styles = StyleSheet.create({
   },
   distanceCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.four,
   },
   distanceInput: {
@@ -339,7 +364,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     borderRadius: Radius.md,
-    overflow: 'hidden',
+    backgroundColor: colors.primary,
     paddingVertical: Spacing.three,
     alignItems: 'center',
   },

@@ -120,8 +120,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
     backgroundColor: colors.surface,
     padding: Spacing.three,
   },

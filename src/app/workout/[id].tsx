@@ -1,89 +1,114 @@
-import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
-import { ActivityRings } from '@/components/activity-rings';
 import { CountdownTimer } from '@/components/countdown-timer';
-import { GradientFill } from '@/components/gradient-fill';
+import { ExerciseSetEditor } from '@/components/exercise-set-editor';
 import { SortableList } from '@/components/sortable-list';
-import { Stepper } from '@/components/stepper';
 import { SummaryStat } from '@/components/summary-stat';
 import { ThemedText } from '@/components/themed-text';
 import { TimerText } from '@/components/timer-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, Radius, RingColors, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
+import { haptics } from '@/lib/haptics';
 import { muscleGroupsFor } from '@/lib/muscles';
-import { currentGoalValue, exercisePR, lastExercisePerformance, todayKey } from '@/lib/store/derive';
+import { describeExerciseSets, exercisePR, lastExercisePerformance, STRENGTH_CALORIES_PER_MINUTE, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import type { ExerciseKind, RoutineExercise, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
+import type { ExerciseKind, RoutineExercise, RoutineSet, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
 import { clampToStep, formatStepperValue } from '@/lib/stepper-math';
-import { fromDisplayWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
+import { formatWeight, fromDisplayWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
+import { clearWorkoutSession, loadWorkoutSession, saveWorkoutSession, type WorkoutSessionSnapshot } from '@/lib/workout-session-storage';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 const REST_SECONDS = 30;
 const QUEUE_ROW_HEIGHT = 56;
 
-type SessionPhase = 'exerciseReady' | 'setPending' | 'setActive' | 'resting' | 'finished';
-type WorkoutExercise = RoutineExercise & { targetRestSec?: number };
+type SessionPhase = 'exerciseReady' | 'setPending' | 'setActive' | 'setLogging' | 'resting' | 'finished';
+type WorkoutExercise = RoutineExercise & { restSec: number };
 
 interface ExerciseEditDraft {
   id: string;
   name: string;
   kind: ExerciseKind;
-  warmupSets: number;
-  warmupTargetReps: number;
-  warmupTargetWeight: number;
-  warmupTargetDurationSec: number;
-  warmupRestSec: number;
-  sets: number;
-  targetReps: number;
-  targetWeight: number;
-  targetDurationSec: number;
-  targetRestSec: number;
+  sets: RoutineSet[];
+  restSec: number;
+}
+
+interface SessionPR {
+  name: string;
+  weight: number;
+  reps?: number;
+  isFirst: boolean;
+}
+
+/** New all-time bests set this session, compared against `priorSessions` (must not yet include this session). */
+function computeSessionPRs(finalLogged: SessionExercise[], priorSessions: Session[]): SessionPR[] {
+  const results: SessionPR[] = [];
+  for (const item of finalLogged) {
+    const bestSet = item.sets.reduce<SetLog | null>((best, set) => {
+      if (set.isWarmup || set.skipped || set.kind === 'time' || !set.weight) return best;
+      if (!best || set.weight > (best.weight ?? 0)) return set;
+      return best;
+    }, null);
+    if (!bestSet?.weight) continue;
+    const priorPR = exercisePR(priorSessions, item.name);
+    if (!priorPR || bestSet.weight > priorPR.weight) {
+      results.push({ name: item.name, weight: bestSet.weight, reps: bestSet.reps, isFirst: !priorPR });
+    }
+  }
+  return results;
+}
+
+/** Ascending reference objects (canonical lbs) for the post-workout "you lifted about as much as…" note. */
+const WEIGHT_COMPARISONS = [
+  { lbs: 60, emoji: '🐕', label: 'a Golden Retriever', plural: 'Golden Retrievers' },
+  { lbs: 180, emoji: '🧍', label: 'an adult human', plural: 'adult humans' },
+  { lbs: 400, emoji: '🎹', label: 'a grand piano', plural: 'grand pianos' },
+  { lbs: 700, emoji: '🏍️', label: 'a motorcycle', plural: 'motorcycles' },
+  { lbs: 2000, emoji: '🚗', label: 'a small car', plural: 'small cars' },
+  { lbs: 5000, emoji: '🛻', label: 'a pickup truck', plural: 'pickup trucks' },
+  { lbs: 12000, emoji: '🦖', label: 'a T. rex', plural: 'T. rexes' },
+  { lbs: 24000, emoji: '🚌', label: 'a school bus', plural: 'school buses' },
+] as const;
+
+function describeWeightComparison(totalLbs: number): { emoji: string; label: string } | null {
+  if (totalLbs < WEIGHT_COMPARISONS[0].lbs) return null;
+  const match = [...WEIGHT_COMPARISONS].reverse().find((entry) => totalLbs >= entry.lbs) ?? WEIGHT_COMPARISONS[0];
+  const multiple = Math.floor(totalLbs / match.lbs);
+  return {
+    emoji: match.emoji,
+    label: multiple > 1 ? `${multiple} ${match.plural}` : match.label,
+  };
 }
 
 function toWorkoutExercise(exercise: RoutineExercise): WorkoutExercise {
   return {
     ...exercise,
     kind: exercise.kind ?? 'reps',
-    warmupSets: exercise.warmupSets ?? 0,
-    warmupTargetReps: exercise.warmupTargetReps ?? exercise.targetReps,
-    warmupTargetWeight: exercise.warmupTargetWeight ?? 0,
-    warmupTargetDurationSec: exercise.warmupTargetDurationSec ?? exercise.targetDurationSec ?? 30,
-    warmupRestSec: exercise.warmupRestSec ?? exercise.targetRestSec ?? REST_SECONDS,
-    targetDurationSec: exercise.targetDurationSec ?? 45,
-    targetRestSec: exercise.targetRestSec ?? REST_SECONDS,
+    restSec: exercise.restSec ?? REST_SECONDS,
   };
 }
 
 function totalPlannedSets(exercise: WorkoutExercise): number {
-  return (exercise.warmupSets ?? 0) + exercise.sets;
+  return exercise.sets.length;
 }
 
-function setTargetsFor(exercise: WorkoutExercise, isWarmup: boolean) {
-  return isWarmup
-    ? {
-        reps: exercise.warmupTargetReps ?? exercise.targetReps,
-        weight: exercise.warmupTargetWeight ?? 0,
-        durationSec: exercise.warmupTargetDurationSec ?? exercise.targetDurationSec ?? 30,
-        restSec: exercise.warmupRestSec ?? exercise.targetRestSec ?? REST_SECONDS,
-      }
-    : {
-        reps: exercise.targetReps,
-        weight: exercise.targetWeight,
-        durationSec: exercise.targetDurationSec ?? 45,
-        restSec: exercise.targetRestSec ?? REST_SECONDS,
-      };
+/** "Warm-up 2 of 3" / "Set 2 of 3" — counts position among same-flag sets so far, independent of ordering. */
+function formatCurrentSetLabel(sets: RoutineSet[], setIndex: number): string {
+  const current = sets[setIndex];
+  if (!current) return '';
+  const sameKind = sets.filter((set) => set.isWarmup === current.isWarmup);
+  const positionAmongKind = sets.slice(0, setIndex + 1).filter((set) => set.isWarmup === current.isWarmup).length;
+  return current.isWarmup ? `Warm-up ${positionAmongKind} of ${sameKind.length}` : `Set ${positionAmongKind} of ${sameKind.length}`;
 }
 
 export default function ActiveWorkoutScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { routines, sessions, cardioSessions, goals, goalEntries, waterEntries, addSession, preferences } = useStore();
+  const { routines, sessions, addSession, preferences } = useStore();
   const unitSystem = preferences.unitSystem;
   const routine = routines.find((r) => r.id === id);
 
@@ -94,11 +119,17 @@ export default function ActiveWorkoutScreen() {
   const [logged, setLogged] = useState<SessionExercise[]>([]);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [reps, setReps] = useState(routine?.exercises[0]?.targetReps ?? 10);
-  const [weight, setWeight] = useState(routine?.exercises[0]?.targetWeight ?? 0);
-  const [durationSec, setDurationSec] = useState(routine?.exercises[0]?.targetDurationSec ?? 45);
+  const [reps, setReps] = useState(routine?.exercises[0]?.sets[0]?.reps ?? 10);
+  const [weight, setWeight] = useState(routine?.exercises[0]?.sets[0]?.weight ?? 0);
+  const [durationSec, setDurationSec] = useState(routine?.exercises[0]?.sets[0]?.durationSec ?? 45);
   const [editingDraft, setEditingDraft] = useState<ExerciseEditDraft | null>(null);
   const [finishedSession, setFinishedSession] = useState<Session | null>(null);
+  const [sessionPRs, setSessionPRs] = useState<SessionPR[]>([]);
+  const [phaseEndsAt, setPhaseEndsAt] = useState<number | null>(null);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [currentSetStartedAt, setCurrentSetStartedAt] = useState<number | null>(null);
+  const [currentSetElapsedSec, setCurrentSetElapsedSec] = useState(0);
+  const [hasCheckedResume, setHasCheckedResume] = useState(false);
 
   useEffect(() => {
     if (startedAt === null || phase === 'finished') return;
@@ -108,6 +139,77 @@ export default function ActiveWorkoutScreen() {
     return () => clearInterval(interval);
   }, [phase, startedAt]);
 
+  useEffect(() => {
+    const currentKind = order[exerciseIndex]?.kind ?? 'reps';
+    if (currentSetStartedAt === null || !(phase === 'setActive' && currentKind === 'reps')) return;
+    const interval = setInterval(() => {
+      setCurrentSetElapsedSec(Math.floor((Date.now() - currentSetStartedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase, exerciseIndex, order, currentSetStartedAt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const routineId = routine?.id;
+    (async () => {
+      const snapshot = routineId ? await loadWorkoutSession(routineId) : null;
+      if (cancelled) return;
+      if (snapshot) {
+        setOrder(snapshot.order);
+        setPhase(snapshot.phase);
+        setExerciseIndex(snapshot.exerciseIndex);
+        setSetIndex(snapshot.setIndex);
+        setLogged(snapshot.logged);
+        setStartedAt(snapshot.startedAt);
+        setReps(snapshot.reps);
+        setWeight(snapshot.weight);
+        setDurationSec(snapshot.durationSec);
+        setCurrentSetStartedAt(snapshot.setStartedAt);
+        setPhaseEndsAt(snapshot.phaseEndsAt);
+        if (snapshot.phaseEndsAt !== null) {
+          setTimerSeconds(Math.max(0, Math.ceil((snapshot.phaseEndsAt - Date.now()) / 1000)));
+        }
+      }
+      setHasCheckedResume(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [routine?.id]);
+
+  useEffect(() => {
+    if (!routine || startedAt === null || phase === 'finished' || !hasCheckedResume) return;
+    const snapshot: WorkoutSessionSnapshot = {
+      savedAt: Date.now(),
+      order,
+      phase,
+      exerciseIndex,
+      setIndex,
+      logged,
+      startedAt,
+      reps,
+      weight,
+      durationSec,
+      setStartedAt: currentSetStartedAt,
+      phaseEndsAt,
+    };
+    saveWorkoutSession(routine.id, snapshot);
+  }, [
+    routine,
+    hasCheckedResume,
+    order,
+    phase,
+    exerciseIndex,
+    setIndex,
+    logged,
+    startedAt,
+    reps,
+    weight,
+    durationSec,
+    currentSetStartedAt,
+    phaseEndsAt,
+  ]);
+
   const exercise = order[exerciseIndex];
 
   if (!routine || !exercise) {
@@ -116,10 +218,17 @@ export default function ActiveWorkoutScreen() {
         <SafeAreaView style={styles.safeArea}>
           <ThemedText type="subtitle">Workout not found</ThemedText>
           <Pressable style={styles.primaryButton} onPress={() => router.back()}>
-            <GradientFill />
             <ThemedText style={styles.primaryButtonText}>Back</ThemedText>
           </Pressable>
         </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (!hasCheckedResume) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea} />
       </View>
     );
   }
@@ -129,13 +238,13 @@ export default function ActiveWorkoutScreen() {
   const completedSets = logged.reduce((sum, item) => sum + item.sets.filter((set) => !set.skipped).length, 0);
   const attemptedSets = logged.reduce((sum, item) => sum + item.sets.length, 0);
   const overallProgress = totalSets > 0 ? attemptedSets / totalSets : 0;
-  const warmupSetCount = exercise.warmupSets ?? 0;
-  const isWarmupSet = setIndex < warmupSetCount;
-  const activeSetTargets = setTargetsFor(exercise, isWarmupSet);
+  const warmupSetCount = exercise.sets.filter((set) => set.isWarmup).length;
+  const activeSet = exercise.sets[setIndex] as RoutineSet | undefined;
+  const isWarmupSet = activeSet?.isWarmup ?? false;
   const plannedSetCount = totalPlannedSets(exercise);
   const isLastSet = setIndex + 1 >= plannedSetCount;
   const isLastExercise = exerciseIndex + 1 >= order.length;
-  const workoutCalories = Math.max(1, Math.round(elapsedSec / 60)) * 8;
+  const workoutCalories = Math.max(1, Math.round(elapsedSec / 60)) * STRENGTH_CALORIES_PER_MINUTE;
 
   const lastPerformance = lastExercisePerformance(sessions, exercise.name);
   const personalRecord = exercisePR(sessions, exercise.name);
@@ -147,12 +256,24 @@ export default function ActiveWorkoutScreen() {
     ? lastPerformance.sets[Math.min(workingSetNumber, lastPerformance.sets.length - 1)]
     : null;
 
+  const weightQuickValues = Array.from(
+    new Set(
+      [activeSet?.weight, lastMatchingSet?.weight, personalRecord?.weight]
+        .filter((value): value is number => !!value)
+        .map((value) => toDisplayWeight(value, unitSystem)),
+    ),
+  )
+    .sort((a, b) => a - b)
+    .slice(0, 3);
+
   const startExercise = () => {
     setStartedAt((value) => value ?? Date.now());
-    const targets = setTargetsFor(exercise, (exercise.warmupSets ?? 0) > 0);
-    setReps(targets.reps);
-    setWeight(targets.weight);
-    setDurationSec(targets.durationSec);
+    const target = exercise.sets[0];
+    if (target) {
+      setReps(target.reps ?? 0);
+      setWeight(target.weight ?? 0);
+      setDurationSec(target.durationSec ?? 0);
+    }
     setPhase('setPending');
   };
 
@@ -177,14 +298,27 @@ export default function ActiveWorkoutScreen() {
       override && override.isWarmup === undefined ? { ...setLog, isWarmup: warmupFlag } : setLog,
     );
     setLogged(next);
+    setCurrentSetStartedAt(null);
 
     if (isLastSet && isLastExercise) {
       finishWorkout(next);
-    } else if (isLastSet) {
-      setPhase('resting');
     } else {
+      const restSec = exercise.restSec;
+      setPhaseEndsAt(() => Date.now() + restSec * 1000);
+      setTimerSeconds(restSec);
       setPhase('resting');
     }
+  };
+
+  const startSet = () => {
+    if (exerciseKind === 'time') {
+      const targetDurationSec = durationSec;
+      setPhaseEndsAt(() => Date.now() + targetDurationSec * 1000);
+      setTimerSeconds(targetDurationSec);
+    } else {
+      setCurrentSetStartedAt(() => Date.now());
+    }
+    setPhase('setActive');
   };
 
   const skipSet = () => {
@@ -204,21 +338,25 @@ export default function ActiveWorkoutScreen() {
     }
     setExerciseIndex((index) => index + 1);
     setSetIndex(0);
-    const upcomingTargets = setTargetsFor(upcoming, (upcoming.warmupSets ?? 0) > 0);
-    setReps(upcomingTargets.reps);
-    setWeight(upcomingTargets.weight);
-    setDurationSec(upcomingTargets.durationSec);
+    const target = upcoming.sets[0];
+    if (target) {
+      setReps(target.reps ?? 0);
+      setWeight(target.weight ?? 0);
+      setDurationSec(target.durationSec ?? 0);
+    }
     setPhase('exerciseReady');
   };
 
   const advanceAfterRest = () => {
     if (!isLastSet) {
       const nextSetIndex = setIndex + 1;
-      const nextTargets = setTargetsFor(exercise, nextSetIndex < warmupSetCount);
+      const target = exercise.sets[nextSetIndex];
       setSetIndex(nextSetIndex);
-      setReps(nextTargets.reps);
-      setWeight(nextTargets.weight);
-      setDurationSec(nextTargets.durationSec);
+      if (target) {
+        setReps(target.reps ?? 0);
+        setWeight(target.weight ?? 0);
+        setDurationSec(target.durationSec ?? 0);
+      }
       setPhase('setPending');
       return;
     }
@@ -227,10 +365,11 @@ export default function ActiveWorkoutScreen() {
 
   /** Marks every remaining set of the current exercise as skipped and moves on. */
   const skipExercise = () => {
-    const remainingSets: SetLog[] = Array.from({ length: plannedSetCount - setIndex }, (_, offset) => {
-      const skippedIndex = setIndex + offset;
-      return { kind: exerciseKind, skipped: true, isWarmup: skippedIndex < warmupSetCount || undefined };
-    });
+    const remainingSets: SetLog[] = exercise.sets.slice(setIndex).map((set) => ({
+      kind: exerciseKind,
+      skipped: true,
+      isWarmup: set.isWarmup || undefined,
+    }));
     const existing = logged.find((item) => item.exerciseId === exercise.id);
     const next = existing
       ? logged.map((item) =>
@@ -256,16 +395,23 @@ export default function ActiveWorkoutScreen() {
       routineName: routine.name,
       date: todayKey(),
       durationMinutes,
-      calories: durationMinutes * 8,
+      calories: durationMinutes * STRENGTH_CALORIES_PER_MINUTE,
       exercises: finalLogged.filter((item) => item.sets.some((set) => !set.skipped)),
     };
   };
 
   const finishWorkout = (finalLogged: SessionExercise[]) => {
     const session = buildSession(finalLogged);
+    setSessionPRs(computeSessionPRs(finalLogged, sessions));
     if (session.exercises.length > 0) addSession(session);
+    clearWorkoutSession(routine.id);
     setFinishedSession(session);
     setPhase('finished');
+  };
+
+  const discardWorkout = () => {
+    clearWorkoutSession(routine.id);
+    router.dismissTo('/dashboard');
   };
 
   const confirmEnd = () => {
@@ -273,14 +419,14 @@ export default function ActiveWorkoutScreen() {
     if (!hasWork) {
       Alert.alert('End workout?', 'Nothing has been logged yet, so the session will be discarded.', [
         { text: 'Keep going', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => router.dismissTo('/dashboard') },
+        { text: 'Discard', style: 'destructive', onPress: discardWorkout },
       ]);
       return;
     }
     Alert.alert('End workout early?', 'Save what you’ve done, or discard the whole session.', [
       { text: 'Keep going', style: 'cancel' },
       { text: 'Save & finish', onPress: () => finishWorkout(logged) },
-      { text: 'Discard workout', style: 'destructive', onPress: () => router.dismissTo('/dashboard') },
+      { text: 'Discard workout', style: 'destructive', onPress: discardWorkout },
     ]);
   };
 
@@ -299,16 +445,8 @@ export default function ActiveWorkoutScreen() {
       id: item.id,
       name: item.name,
       kind: item.kind ?? 'reps',
-      warmupSets: item.warmupSets ?? 0,
-      warmupTargetReps: item.warmupTargetReps ?? item.targetReps,
-      warmupTargetWeight: item.warmupTargetWeight ?? 0,
-      warmupTargetDurationSec: item.warmupTargetDurationSec ?? item.targetDurationSec ?? 30,
-      warmupRestSec: item.warmupRestSec ?? item.targetRestSec ?? REST_SECONDS,
-      sets: item.sets,
-      targetReps: item.targetReps,
-      targetWeight: item.targetWeight,
-      targetDurationSec: item.targetDurationSec ?? 45,
-      targetRestSec: item.targetRestSec ?? REST_SECONDS,
+      sets: item.sets.map((set) => ({ ...set })),
+      restSec: item.restSec,
     });
   };
 
@@ -318,38 +456,39 @@ export default function ActiveWorkoutScreen() {
 
   const saveExerciseEdit = () => {
     const nextName = editingDraft?.name.trim();
-    if (!editingDraft || !nextName) return;
+    if (!editingDraft || !nextName || editingDraft.sets.length === 0) return;
     const nextExercise: WorkoutExercise = {
       id: editingDraft.id,
       name: nextName,
       kind: editingDraft.kind,
-      warmupSets: editingDraft.warmupSets,
-      warmupTargetReps: editingDraft.warmupTargetReps,
-      warmupTargetWeight: editingDraft.warmupTargetWeight,
-      warmupTargetDurationSec: editingDraft.warmupTargetDurationSec,
-      warmupRestSec: editingDraft.warmupRestSec,
       sets: editingDraft.sets,
-      targetReps: editingDraft.targetReps,
-      targetWeight: editingDraft.targetWeight,
-      targetDurationSec: editingDraft.targetDurationSec,
-      targetRestSec: editingDraft.targetRestSec,
+      restSec: editingDraft.restSec,
       lastTime: order.find((item) => item.id === editingDraft.id)?.lastTime ?? null,
     };
 
     setOrder((current) => current.map((item) => (item.id === editingDraft.id ? nextExercise : item)));
     if (exercise.id === editingDraft.id) {
-      const nextTargets = setTargetsFor(nextExercise, setIndex < (nextExercise.warmupSets ?? 0));
-      setReps(nextTargets.reps);
-      setWeight(nextTargets.weight);
-      setDurationSec(nextTargets.durationSec);
-      setSetIndex((index) => Math.min(index, totalPlannedSets(nextExercise) - 1));
+      const nextSetIndex = Math.min(setIndex, nextExercise.sets.length - 1);
+      const target = nextExercise.sets[nextSetIndex];
+      setSetIndex(nextSetIndex);
+      if (target) {
+        setReps(target.reps ?? 0);
+        setWeight(target.weight ?? 0);
+        setDurationSec(target.durationSec ?? 0);
+      }
     }
     setEditingDraft(null);
   };
 
   if (phase === 'finished') {
     const session = finishedSession ?? buildSession(logged);
-    const updatedSessions = [session, ...sessions];
+    const totalWeightLifted = session.exercises.reduce(
+      (sum, item) =>
+        sum + item.sets.reduce((setSum, set) => setSum + (set.skipped ? 0 : (set.reps ?? 0) * (set.weight ?? 0)), 0),
+      0,
+    );
+    const comparison = describeWeightComparison(totalWeightLifted);
+    const prNames = new Set(sessionPRs.map((pr) => pr.name));
 
     return (
       <View style={styles.container}>
@@ -357,41 +496,77 @@ export default function ActiveWorkoutScreen() {
           <View style={styles.finishedHeader}>
             <ThemedText type="title">Workout finished!</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              Nice work. Your weekly rings have been updated.
+              Nice work — here’s how it went.
             </ThemedText>
           </View>
 
-          <ActivityRings
-            animated
-            size={220}
-            strokeWidth={15}
-            gap={6}
-            rings={goals.map((goal, index) => ({
-              progress: currentGoalValue(goal, updatedSessions, cardioSessions, waterEntries, goalEntries) / goal.target,
-              color: RingColors[index % RingColors.length],
-              trackColor: colors.border,
-            }))}
-          />
+          <ScrollView style={styles.flex} contentContainerStyle={styles.finishedContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.summaryRow}>
+              <SummaryStat animatedValue={session.durationMinutes} unit="min" label="Duration" />
+              <SummaryStat
+                animatedValue={session.calories ?? workoutCalories}
+                unit="cal"
+                label="Calories"
+                icon="flame.fill"
+              />
+              <SummaryStat animatedValue={completedSets} unit="sets" label="Completed" />
+            </View>
 
-          <View style={styles.summaryRow}>
-            <SummaryStat animatedValue={session.durationMinutes} unit="min" label="Duration" />
-            <SummaryStat animatedValue={session.calories ?? workoutCalories} unit="cal" label="Calories" />
-            <SummaryStat animatedValue={completedSets} unit="sets" label="Completed" />
-          </View>
-
-          <ScrollView style={styles.flex} contentContainerStyle={styles.finishedList}>
-            {session.exercises.map((item) => (
-              <ThemedView key={item.exerciseId} type="surface" style={styles.finishedExercise}>
-                <ThemedText type="smallBold">{item.name}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {item.sets.filter((set) => !set.skipped).length} sets
+            {totalWeightLifted > 0 && (
+              <View style={styles.funCard}>
+                <ThemedText type="label" style={{ color: colors.onPrimaryDim }}>
+                  TOTAL WEIGHT MOVED
                 </ThemedText>
-              </ThemedView>
-            ))}
+                <ThemedText type="statLarge" style={{ color: colors.onPrimary }}>
+                  {formatWeight(totalWeightLifted, unitSystem)}
+                </ThemedText>
+                {comparison ? (
+                  <ThemedText type="small" style={{ color: colors.onPrimaryDim }}>
+                    {comparison.emoji} About as much as {comparison.label}
+                  </ThemedText>
+                ) : null}
+              </View>
+            )}
+
+            {sessionPRs.length > 0 && (
+              <View style={styles.prSection}>
+                <ThemedText type="label" themeColor="textSecondary">
+                  NEW PRS
+                </ThemedText>
+                {sessionPRs.map((pr) => (
+                  <View key={pr.name} style={styles.prRow}>
+                    <View style={styles.prRowBadge}>
+                      <SymbolView name="trophy.fill" size={13} tintColor={colors.onPrimary} />
+                    </View>
+                    <ThemedText type="smallBold" style={styles.flex}>
+                      {pr.name}
+                    </ThemedText>
+                    <ThemedText type="statInline" themeColor="primary">
+                      {formatSetLog({ reps: pr.reps, weight: pr.weight }, unitSystem)}
+                    </ThemedText>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.finishedList}>
+              {session.exercises.map((item) => (
+                <ThemedView key={item.exerciseId} type="surface" style={styles.finishedExercise}>
+                  <View style={styles.finishedExerciseName}>
+                    <ThemedText type="smallBold">{item.name}</ThemedText>
+                    {prNames.has(item.name) ? (
+                      <SymbolView name="trophy.fill" size={13} tintColor={colors.primary} />
+                    ) : null}
+                  </View>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {item.sets.filter((set) => !set.skipped).length} sets
+                  </ThemedText>
+                </ThemedView>
+              ))}
+            </View>
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
-            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Return to Home
             </ThemedText>
@@ -435,7 +610,7 @@ export default function ActiveWorkoutScreen() {
               keyFor={(item) => item.id}
               rowHeight={QUEUE_ROW_HEIGHT}
               onOrderChange={reorderQueue}
-              renderRow={(item) => {
+              renderRow={(item, dragHandle) => {
                 const absoluteIndex = order.findIndex((candidate) => candidate.id === item.id);
                 return (
                   <EditableExerciseRow
@@ -445,28 +620,35 @@ export default function ActiveWorkoutScreen() {
                     editing={editingDraft?.id === item.id}
                     onBeginEdit={() => beginEdit(item)}
                     unitSystem={unitSystem}
+                    dragHandle={dragHandle}
                   />
                 );
               }}
             />
-            {editingDraft ? (
-              <ExerciseEditPanel
-                draft={editingDraft}
-                unitSystem={unitSystem}
-                onChangeDraft={patchEditingDraft}
-                onCancel={() => setEditingDraft(null)}
-                onSave={saveExerciseEdit}
-              />
-            ) : null}
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={startExercise}>
-            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Start Exercise
             </ThemedText>
           </Pressable>
         </SafeAreaView>
+
+        <Modal
+          visible={editingDraft !== null}
+          animationType="slide"
+          presentationStyle="fullScreen"
+          onRequestClose={() => setEditingDraft(null)}>
+          {editingDraft && (
+            <ExerciseEditModal
+              draft={editingDraft}
+              unitSystem={unitSystem}
+              onChangeDraft={patchEditingDraft}
+              onCancel={() => setEditingDraft(null)}
+              onSave={saveExerciseEdit}
+            />
+          )}
+        </Modal>
       </View>
     );
   }
@@ -500,51 +682,67 @@ export default function ActiveWorkoutScreen() {
 
         <View style={styles.exerciseHeader}>
           <ThemedText type="label">
-            {formatCurrentSetLabel(setIndex, warmupSetCount, exercise.sets).toUpperCase()}
+            {formatCurrentSetLabel(exercise.sets, setIndex).toUpperCase()}
           </ThemedText>
           <ThemedText type="subtitle">{exercise.name}</ThemedText>
           <MuscleChips groups={muscleGroups} />
         </View>
 
-        <View style={styles.flex}>
-          {phase === 'setPending' && (
-            <TargetCard
-              exercise={exercise}
-              kind={exerciseKind}
-              isWarmup={isWarmupSet}
-              targets={activeSetTargets}
-              unitSystem={unitSystem}
-              lastSet={lastMatchingSet}
-              personalRecord={personalRecord}
-            />
+        <ScrollView style={styles.flex} contentContainerStyle={styles.phaseBodyContent} showsVerticalScrollIndicator={false}>
+          {phase === 'setPending' && activeSet && (
+            <>
+              <TargetCard
+                exercise={exercise}
+                kind={exerciseKind}
+                isWarmup={isWarmupSet}
+                set={activeSet}
+                restSec={exercise.restSec}
+                unitSystem={unitSystem}
+                lastSet={lastMatchingSet}
+                personalRecord={personalRecord}
+              />
+              <SetRoadmap sets={exercise.sets} setIndex={setIndex} unitSystem={unitSystem} />
+            </>
           )}
 
           {phase === 'setActive' && exerciseKind === 'reps' && (
-            <ThemedView type="surface" style={styles.setStepperCard}>
-              <InlineStepper
+            <View style={styles.stopwatchArea}>
+              <ThemedText type="label" themeColor="textSecondary">
+                SET IN PROGRESS
+              </ThemedText>
+              <TimerText seconds={currentSetElapsedSec} size="lg" />
+            </View>
+          )}
+
+          {phase === 'setLogging' && (
+            <View style={styles.setLoggingArea}>
+              <SetLogCard
                 label="Reps"
                 value={reps}
+                targetValue={activeSet?.reps}
                 min={1}
-                max={Math.max(activeSetTargets.reps * 2, 20)}
+                max={Math.max((activeSet?.reps ?? 0) * 2, 20)}
                 step={1}
                 onChange={setReps}
               />
-              <InlineStepper
+              <SetLogCard
                 label="Weight"
                 value={toDisplayWeight(weight, unitSystem)}
-                min={0}
-                max={Math.max(toDisplayWeight(activeSetTargets.weight, unitSystem) * 2, unitSystem === 'metric' ? 45 : 100)}
-                step={unitSystem === 'metric' ? 1 : 2.5}
                 unit={weightUnitLabel(unitSystem)}
+                targetValue={activeSet ? toDisplayWeight(activeSet.weight ?? 0, unitSystem) : undefined}
+                min={0}
+                max={Math.max(toDisplayWeight(activeSet?.weight ?? 0, unitSystem) * 2, unitSystem === 'metric' ? 45 : 100)}
+                step={unitSystem === 'metric' ? 1 : 2.5}
                 onChange={(displayValue) => setWeight(fromDisplayWeight(displayValue, unitSystem))}
+                quickValues={weightQuickValues}
               />
-            </ThemedView>
+            </View>
           )}
 
           {phase === 'setActive' && exerciseKind === 'time' && (
             <CountdownTimer
               key={`${exercise.id}-${setIndex}`}
-              seconds={durationSec}
+              seconds={timerSeconds}
               label="WORK"
               onDone={() => completeSet({ kind: 'time', durationSec })}
             />
@@ -553,18 +751,18 @@ export default function ActiveWorkoutScreen() {
           {phase === 'resting' && (
             <CountdownTimer
               key={`rest-${exercise.id}-${setIndex}`}
-              seconds={activeSetTargets.restSec}
+              seconds={timerSeconds}
               label="REST"
               nextLabel={
                 !isLastSet
-                  ? formatCurrentSetLabel(setIndex + 1, warmupSetCount, exercise.sets)
+                  ? formatCurrentSetLabel(exercise.sets, setIndex + 1)
                   : order[exerciseIndex + 1]?.name ?? ''
               }
               onDone={advanceAfterRest}
               skippable
             />
           )}
-        </View>
+        </ScrollView>
 
         {phase === 'setPending' && (
           <>
@@ -574,8 +772,7 @@ export default function ActiveWorkoutScreen() {
                   Skip Set
                 </ThemedText>
               </Pressable>
-              <Pressable style={[styles.primaryButton, styles.flex]} onPress={() => setPhase('setActive')}>
-                <GradientFill />
+              <Pressable style={[styles.primaryButton, styles.flex]} onPress={startSet}>
                 <ThemedText type="smallBold" style={styles.primaryButtonText}>
                   Start Set
                 </ThemedText>
@@ -593,12 +790,24 @@ export default function ActiveWorkoutScreen() {
           <Pressable
             style={styles.primaryButton}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              completeSet();
+              haptics.impact();
+              setPhase('setLogging');
             }}>
-            <GradientFill />
             <ThemedText type="smallBold" style={styles.primaryButtonText}>
               Complete Set
+            </ThemedText>
+          </Pressable>
+        )}
+
+        {phase === 'setLogging' && (
+          <Pressable
+            style={styles.primaryButton}
+            onPress={() => {
+              haptics.impact();
+              completeSet();
+            }}>
+            <ThemedText type="smallBold" style={styles.primaryButtonText}>
+              Log Set
             </ThemedText>
           </Pressable>
         )}
@@ -611,7 +820,7 @@ export default function ActiveWorkoutScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               <ThemedText type="statInline">{Math.round(overallProgress * 100)}%</ThemedText> complete
             </ThemedText>
-            <TimerText seconds={elapsedSec} size="sm" />
+            <TimerText seconds={elapsedSec} size="xs" />
           </View>
         </View>
       </SafeAreaView>
@@ -638,7 +847,8 @@ function TargetCard({
   exercise,
   kind,
   isWarmup,
-  targets,
+  set,
+  restSec,
   unitSystem,
   lastSet,
   personalRecord,
@@ -646,13 +856,14 @@ function TargetCard({
   exercise: WorkoutExercise;
   kind: 'reps' | 'time';
   isWarmup: boolean;
-  targets: ReturnType<typeof setTargetsFor>;
+  set: RoutineSet;
+  restSec: number;
   unitSystem: UnitSystem;
   lastSet: SetLog | null;
   personalRecord: { weight: number; reps?: number; date: string } | null;
 }) {
   const isPRAttempt =
-    !isWarmup && kind === 'reps' && personalRecord !== null && targets.weight > personalRecord.weight;
+    !isWarmup && kind === 'reps' && personalRecord !== null && (set.weight ?? 0) > personalRecord.weight;
 
   return (
     <ThemedView type="surface" style={styles.targetCard}>
@@ -671,7 +882,7 @@ function TargetCard({
       {kind === 'time' ? (
         <View style={styles.targetColumn}>
           <ThemedText type="statLarge" style={styles.targetValue}>
-            {formatDuration(targets.durationSec)}
+            {formatDuration(set.durationSec ?? 0)}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             target time
@@ -681,7 +892,7 @@ function TargetCard({
         <View style={styles.targetRow}>
           <View style={styles.targetColumn}>
             <ThemedText type="statLarge" style={styles.targetValue}>
-              {targets.reps}
+              {set.reps ?? 0}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               target reps
@@ -690,7 +901,7 @@ function TargetCard({
           <View style={styles.targetDivider} />
           <View style={styles.targetColumn}>
             <ThemedText type="statLarge" style={styles.targetValue}>
-              {toDisplayWeight(targets.weight, unitSystem)}
+              {toDisplayWeight(set.weight ?? 0, unitSystem)}
               <ThemedText type="small" style={{ color: colors.primaryLight }}>
                 {' '}
                 {weightUnitLabel(unitSystem)}
@@ -719,15 +930,62 @@ function TargetCard({
         <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
           Best ever:{' '}
           <ThemedText type="statInline" themeColor="primary">
-            {toDisplayWeight(personalRecord.weight, unitSystem)} {weightUnitLabel(unitSystem)}
-            {personalRecord.reps ? ` × ${personalRecord.reps}` : ''}
+            {personalRecord.reps
+              ? formatSetLog({ reps: personalRecord.reps, weight: personalRecord.weight }, unitSystem)
+              : formatWeight(personalRecord.weight, unitSystem)}
           </ThemedText>
         </ThemedText>
       )}
       <ThemedText type="small" themeColor="textSecondary" style={styles.lastTime}>
-        Rest: <ThemedText type="statInline">{formatDuration(targets.restSec)}</ThemedText>
+        Rest: <ThemedText type="statInline">{formatDuration(restSec)}</ThemedText>
       </ThemedText>
     </ThemedView>
+  );
+}
+
+/** The rest of this exercise's planned sets — turns the pre-set screen's blank space into a mini agenda. */
+function SetRoadmap({
+  sets,
+  setIndex,
+  unitSystem,
+}: {
+  sets: RoutineSet[];
+  setIndex: number;
+  unitSystem: UnitSystem;
+}) {
+  if (sets.length <= 1) return null;
+  return (
+    <View style={styles.roadmap}>
+      <ThemedText type="label" themeColor="textSecondary">
+        THIS EXERCISE
+      </ThemedText>
+      {sets.map((set, index) => {
+        const done = index < setIndex;
+        const current = index === setIndex;
+        return (
+          <View key={set.id} style={styles.roadmapRow}>
+            <View style={[styles.roadmapIcon, done && styles.roadmapIconDone, current && styles.roadmapIconCurrent]}>
+              {done ? (
+                <SymbolView name="checkmark" size={11} tintColor={colors.onPrimary} />
+              ) : (
+                <ThemedText type="caption" themeColor="textSecondary">
+                  {index + 1}
+                </ThemedText>
+              )}
+            </View>
+            <ThemedText type="small" themeColor={current ? 'text' : 'textSecondary'} style={styles.flex}>
+              {set.isWarmup ? 'Warm-up · ' : ''}
+              {formatSetLog(set, unitSystem)}
+            </ThemedText>
+            {current ? (
+              <ThemedText type="caption" themeColor="primary">
+                NOW
+              </ThemedText>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
   );
 }
 
@@ -738,6 +996,7 @@ function EditableExerciseRow({
   editing,
   onBeginEdit,
   unitSystem,
+  dragHandle,
 }: {
   item: WorkoutExercise;
   index: number;
@@ -745,6 +1004,7 @@ function EditableExerciseRow({
   editing: boolean;
   onBeginEdit: () => void;
   unitSystem: UnitSystem;
+  dragHandle: ReactNode;
 }) {
   return (
     <View style={styles.editRow}>
@@ -752,11 +1012,12 @@ function EditableExerciseRow({
       <Pressable hitSlop={8} onPress={onBeginEdit}>
         <SymbolView name="pencil" size={16} tintColor={editing ? colors.primaryLight : colors.textSecondary} />
       </Pressable>
+      {dragHandle}
     </View>
   );
 }
 
-function ExerciseEditPanel({
+function ExerciseEditModal({
   draft,
   unitSystem,
   onChangeDraft,
@@ -769,123 +1030,50 @@ function ExerciseEditPanel({
   onCancel: () => void;
   onSave: () => void;
 }) {
-  const canSave = draft.name.trim().length > 0;
+  const canSave = draft.name.trim().length > 0 && draft.sets.length > 0;
   return (
-    <ThemedView type="surface" style={styles.editPanel}>
-      <TextInput
-        style={styles.replacementInput}
-        value={draft.name}
-        onChangeText={(name) => onChangeDraft({ name })}
-        placeholder="Exercise name"
-        placeholderTextColor={colors.textSecondary}
-        autoFocus
-      />
-      <ModeToggle kind={draft.kind} onChange={(kind) => onChangeDraft({ kind })} />
-      <View style={styles.editControls}>
-        <View style={styles.editSetGroup}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            WARM-UP SETS
-          </ThemedText>
-          <Stepper
-            label="Sets"
-            value={draft.warmupSets}
-            min={0}
-            step={1}
-            onChange={(warmupSets) => onChangeDraft({ warmupSets })}
-          />
-          {draft.warmupSets > 0 ? (
-            draft.kind === 'time' ? (
-              <Stepper
-                label="Work"
-                value={draft.warmupTargetDurationSec}
-                min={5}
-                step={5}
-                suffix="sec"
-                onChange={(warmupTargetDurationSec) => onChangeDraft({ warmupTargetDurationSec })}
-              />
-            ) : (
-              <>
-                <Stepper
-                  label="Reps"
-                  value={draft.warmupTargetReps}
-                  min={1}
-                  step={1}
-                  onChange={(warmupTargetReps) => onChangeDraft({ warmupTargetReps })}
-                />
-                <Stepper
-                  label="Weight"
-                  value={toDisplayWeight(draft.warmupTargetWeight, unitSystem)}
-                  min={0}
-                  step={unitSystem === 'metric' ? 1 : 2.5}
-                  suffix={weightUnitLabel(unitSystem)}
-                  onChange={(displayWeight) => onChangeDraft({ warmupTargetWeight: fromDisplayWeight(displayWeight, unitSystem) })}
-                />
-              </>
-            )
-          ) : null}
-          {draft.warmupSets > 0 ? (
-            <Stepper
-              label="Rest"
-              value={draft.warmupRestSec}
-              min={0}
-              step={5}
-              suffix="sec"
-              onChange={(warmupRestSec) => onChangeDraft({ warmupRestSec })}
+    <SafeAreaProvider>
+      <ThemedView style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.editHeaderRow}>
+            <Pressable onPress={onCancel} hitSlop={12}>
+              <ThemedText type="link" themeColor="textSecondary">
+                Cancel
+              </ThemedText>
+            </Pressable>
+            <ThemedText type="smallBold">Edit Exercise</ThemedText>
+            <Pressable onPress={onSave} hitSlop={12} disabled={!canSave}>
+              <ThemedText type="link" style={{ color: colors.primaryLight, opacity: canSave ? 1 : 0.4 }}>
+                Save
+              </ThemedText>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            contentContainerStyle={styles.editModalContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled">
+            <TextInput
+              style={styles.replacementInput}
+              value={draft.name}
+              onChangeText={(name) => onChangeDraft({ name })}
+              placeholder="Exercise name"
+              placeholderTextColor={colors.textSecondary}
+              autoFocus
             />
-          ) : null}
-        </View>
-        <View style={styles.editSetGroup}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            MAIN SETS
-          </ThemedText>
-          <Stepper label="Sets" value={draft.sets} min={1} step={1} onChange={(sets) => onChangeDraft({ sets })} />
-          {draft.kind === 'time' ? (
-            <Stepper
-              label="Work"
-              value={draft.targetDurationSec}
-              min={5}
-              step={5}
-              suffix="sec"
-              onChange={(targetDurationSec) => onChangeDraft({ targetDurationSec })}
+            <ModeToggle kind={draft.kind} onChange={(kind) => onChangeDraft({ kind })} />
+            <ExerciseSetEditor
+              sets={draft.sets}
+              onChangeSets={(sets) => onChangeDraft({ sets })}
+              kind={draft.kind}
+              restSec={draft.restSec}
+              onChangeRestSec={(restSec) => onChangeDraft({ restSec })}
+              unitSystem={unitSystem}
             />
-          ) : (
-            <>
-              <Stepper
-                label="Reps"
-                value={draft.targetReps}
-                min={1}
-                step={1}
-                onChange={(targetReps) => onChangeDraft({ targetReps })}
-              />
-              <Stepper
-                label="Weight"
-                value={toDisplayWeight(draft.targetWeight, unitSystem)}
-                min={0}
-                step={unitSystem === 'metric' ? 1 : 2.5}
-                suffix={weightUnitLabel(unitSystem)}
-                onChange={(displayWeight) => onChangeDraft({ targetWeight: fromDisplayWeight(displayWeight, unitSystem) })}
-              />
-            </>
-          )}
-          <Stepper
-            label="Rest"
-            value={draft.targetRestSec}
-            min={0}
-            step={5}
-            suffix="sec"
-            onChange={(targetRestSec) => onChangeDraft({ targetRestSec })}
-          />
-        </View>
-      </View>
-      <View style={styles.editActions}>
-        <Pressable hitSlop={8} onPress={onCancel}>
-          <SymbolView name="xmark.circle.fill" size={22} tintColor={colors.textSecondary} />
-        </Pressable>
-        <Pressable hitSlop={8} onPress={onSave} disabled={!canSave}>
-          <SymbolView name="checkmark.circle.fill" size={22} tintColor={canSave ? colors.primaryLight : colors.textSecondary} />
-        </Pressable>
-      </View>
-    </ThemedView>
+          </ScrollView>
+        </SafeAreaView>
+      </ThemedView>
+    </SafeAreaProvider>
   );
 }
 
@@ -921,7 +1109,7 @@ function ExerciseStatusRow({
       <View style={styles.flex}>
         <ThemedText type="smallBold">{item.name}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {describeExercise(item, unitSystem)}
+          {describeExerciseSets(item, unitSystem)}
         </ThemedText>
       </View>
     </View>
@@ -948,13 +1136,15 @@ function ModeToggle({ kind, onChange }: { kind: ExerciseKind; onChange: (kind: E
   );
 }
 
-function InlineStepper({
+function SetLogCard({
   label,
   value,
   min,
   max,
   step,
   unit,
+  targetValue,
+  quickValues,
   onChange,
 }: {
   label: string;
@@ -963,6 +1153,8 @@ function InlineStepper({
   max: number;
   step: number;
   unit?: string;
+  targetValue?: number;
+  quickValues?: number[];
   onChange: (value: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -980,81 +1172,94 @@ function InlineStepper({
     onChange(clampToStep(value + delta, min, max, step));
   };
 
+  const unitSuffix = unit ? ` ${unit}` : '';
+  const delta = targetValue !== undefined ? Number((value - targetValue).toFixed(2)) : null;
+  const deltaLabel =
+    targetValue === undefined
+      ? null
+      : delta === 0
+        ? `vs ${formatStepperValue(targetValue)}${unitSuffix}`
+        : `${delta! > 0 ? '+' : ''}${formatStepperValue(delta!)}${unitSuffix}`;
+  const hasQuickValues = !!quickValues && quickValues.length > 0;
+
   return (
-    <View style={styles.setStepperRow}>
-      <View style={styles.setStepperLabelWrap}>
-        <ThemedText type="smallBold">{label}</ThemedText>
-        {unit ? (
-          <ThemedText type="small" themeColor="textSecondary">
-            {unit}
+    <ThemedView type="surface" style={styles.setLogCard}>
+      <View style={styles.setLogCardHeader}>
+        <ThemedText type="label" themeColor="textSecondary">
+          {label.toUpperCase()}
+        </ThemedText>
+        {deltaLabel ? (
+          <ThemedText type="small" themeColor={delta ? 'primary' : 'textSecondary'}>
+            {deltaLabel}
           </ThemedText>
         ) : null}
       </View>
-      <View style={styles.setStepperControls}>
+
+      {editing ? (
+        <TextInput
+          style={styles.setLogValueInput}
+          value={draft}
+          onChangeText={setDraft}
+          onBlur={commitDraft}
+          onSubmitEditing={commitDraft}
+          keyboardType="decimal-pad"
+          selectTextOnFocus
+          autoFocus
+        />
+      ) : (
+        <Pressable
+          onPress={() => {
+            setDraft(formatStepperValue(value));
+            setEditing(true);
+          }}>
+          <ThemedText type="statLarge" style={styles.setLogValue}>
+            {formatStepperValue(value)}
+            {unit ? (
+              <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                {' '}
+                {unit}
+              </ThemedText>
+            ) : null}
+          </ThemedText>
+        </Pressable>
+      )}
+
+      <View style={[styles.setLogControls, !hasQuickValues && styles.setLogControlsCentered]}>
         <Pressable style={styles.setStepperButton} onPress={() => changeBy(-step)}>
           <SymbolView name="minus" size={18} tintColor={colors.text} />
         </Pressable>
-        {editing ? (
-          <TextInput
-            style={styles.setStepperInput}
-            value={draft}
-            onChangeText={setDraft}
-            onBlur={commitDraft}
-            onSubmitEditing={commitDraft}
-            keyboardType="decimal-pad"
-            selectTextOnFocus
-            autoFocus
-          />
-        ) : (
-          <Pressable
-            style={styles.setStepperValueButton}
-            onPress={() => {
-              setDraft(formatStepperValue(value));
-              setEditing(true);
-            }}>
-            <ThemedText type="subtitle" style={styles.setStepperValue}>
-              {formatStepperValue(value)}
-            </ThemedText>
-          </Pressable>
-        )}
+        {hasQuickValues ? (
+          <View style={styles.quickChipRow}>
+            {quickValues!.map((quickValue) => {
+              const active = value === quickValue;
+              return (
+                <Pressable
+                  key={quickValue}
+                  style={[styles.quickChip, active && styles.quickChipActive]}
+                  onPress={() => {
+                    haptics.selection();
+                    onChange(quickValue);
+                  }}>
+                  <ThemedText type="small" style={active ? styles.quickChipTextActive : styles.quickChipText}>
+                    {formatStepperValue(quickValue)}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         <Pressable style={styles.setStepperButton} onPress={() => changeBy(step)}>
           <SymbolView name="plus" size={18} tintColor={colors.text} />
         </Pressable>
       </View>
-    </View>
+    </ThemedView>
   );
-}
-
-function describeExercise(exercise: WorkoutExercise, unitSystem: UnitSystem): string {
-  const mainRestLabel = `, ${formatDuration(exercise.targetRestSec ?? REST_SECONDS)} rest`;
-  const warmupTargets = setTargetsFor(exercise, true);
-  const warmupLabel = exercise.warmupSets
-    ? `${exercise.warmupSets} warm-up x ${formatTargets(exercise, warmupTargets, unitSystem)} + `
-    : '';
-  if ((exercise.kind ?? 'reps') === 'time') {
-    return `${warmupLabel}${exercise.sets} x ${formatDuration(exercise.targetDurationSec ?? 45)}${mainRestLabel}`;
-  }
-  const weightLabel =
-    exercise.targetWeight > 0 ? ` @ ${toDisplayWeight(exercise.targetWeight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
-  return `${warmupLabel}${exercise.sets} x ${exercise.targetReps}${weightLabel}${mainRestLabel}`;
-}
-
-function formatTargets(exercise: WorkoutExercise, targets: ReturnType<typeof setTargetsFor>, unitSystem: UnitSystem): string {
-  const restLabel = `, ${formatDuration(targets.restSec)} rest`;
-  if ((exercise.kind ?? 'reps') === 'time') return `${formatDuration(targets.durationSec)}${restLabel}`;
-  const weightLabel = targets.weight > 0 ? ` @ ${toDisplayWeight(targets.weight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
-  return `${targets.reps}${weightLabel}${restLabel}`;
 }
 
 function formatSetLog(set: { reps?: number; weight?: number; durationSec?: number }, unitSystem: UnitSystem): string {
   if (set.durationSec !== undefined) return formatDuration(set.durationSec);
-  const weightLabel = set.weight ? ` @ ${toDisplayWeight(set.weight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
+  const weightLabel = set.weight ? ` × ${toDisplayWeight(set.weight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
   return `${set.reps ?? 0} reps${weightLabel}`;
-}
-
-function formatCurrentSetLabel(setIndex: number, warmupSets: number, workingSets: number): string {
-  if (setIndex < warmupSets) return `Warm-up ${setIndex + 1} of ${warmupSets}`;
-  return `Set ${setIndex - warmupSets + 1} of ${workingSets}`;
 }
 
 const styles = StyleSheet.create({
@@ -1065,6 +1270,9 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  phaseBodyContent: {
+    flexGrow: 1,
   },
   safeArea: {
     flex: 1,
@@ -1130,13 +1338,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
   },
-  editPanel: {
-    flex: 1,
-    gap: Spacing.two,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: Spacing.two,
+  editHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.three,
+  },
+  editModalContent: {
+    gap: Spacing.three,
+    paddingBottom: Spacing.six,
   },
   replacementInput: {
     borderRadius: Radius.sm,
@@ -1144,26 +1354,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     color: colors.text,
     backgroundColor: colors.surfaceElevated,
-  },
-  editControls: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.three,
-  },
-  editSetGroup: {
-    width: '100%',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: Spacing.three,
-    padding: Spacing.two,
-    borderRadius: Radius.sm,
-    backgroundColor: colors.surfaceElevated,
-  },
-  editActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: Spacing.three,
   },
   modeToggle: {
     flexDirection: 'row',
@@ -1185,8 +1375,7 @@ const styles = StyleSheet.create({
   },
   targetCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.four,
     gap: Spacing.three,
     marginBottom: Spacing.three,
@@ -1222,26 +1411,80 @@ const styles = StyleSheet.create({
   lastTime: {
     textAlign: 'center',
   },
-  setStepperCard: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: Spacing.four,
-    gap: Spacing.four,
-    marginBottom: Spacing.three,
+  roadmap: {
+    gap: Spacing.two,
+    marginTop: Spacing.one,
   },
-  setStepperRow: {
+  roadmapRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.two,
   },
-  setStepperLabelWrap: {
+  roadmapIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roadmapIconDone: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  roadmapIconCurrent: {
+    borderColor: colors.primary,
+  },
+  stopwatchArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.three,
+  },
+  setLoggingArea: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: Spacing.three,
+  },
+  setLogCard: {
+    borderRadius: Radius.lg,
+    backgroundColor: colors.surface,
+    padding: Spacing.four,
+    gap: Spacing.three,
+    alignItems: 'center',
+  },
+  setLogCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    alignSelf: 'stretch',
   },
-  setStepperControls: {
+  setLogValue: {
+    fontSize: 40,
+    lineHeight: 44,
+    color: colors.primaryLight,
+  },
+  setLogValueInput: {
+    minWidth: 140,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    textAlign: 'center',
+    fontSize: 34,
+    lineHeight: 38,
+    color: colors.primaryLight,
+    backgroundColor: colors.surfaceElevated,
+  },
+  setLogControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+  },
+  setLogControlsCentered: {
+    justifyContent: 'center',
+    gap: Spacing.four,
   },
   setStepperButton: {
     width: 52,
@@ -1251,29 +1494,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  setStepperValueButton: {
-    flex: 1,
-    minHeight: 58,
-    borderRadius: Radius.md,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
+  quickChipRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
   },
-  setStepperValue: {
-    fontSize: 34,
-    lineHeight: 38,
-    color: colors.primaryLight,
-  },
-  setStepperInput: {
-    flex: 1,
-    minHeight: 58,
-    borderRadius: Radius.md,
+  quickChip: {
+    paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
-    textAlign: 'center',
-    fontSize: 34,
-    lineHeight: 38,
-    color: colors.primaryLight,
+    borderRadius: Radius.sm,
     backgroundColor: colors.surfaceElevated,
+  },
+  quickChipActive: {
+    backgroundColor: colors.primary,
+  },
+  quickChipText: {
+    color: colors.textSecondary,
+  },
+  quickChipTextActive: {
+    color: colors.onPrimary,
   },
   actionRow: {
     flexDirection: 'row',
@@ -1293,7 +1531,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     borderRadius: Radius.md,
-    overflow: 'hidden',
+    backgroundColor: colors.primary,
     paddingVertical: Spacing.three,
     alignItems: 'center',
   },
@@ -1321,21 +1559,55 @@ const styles = StyleSheet.create({
   },
   finishedHeader: {
     gap: Spacing.one,
-    alignItems: 'center',
+    alignItems: 'flex-start',
+  },
+  finishedContent: {
+    gap: Spacing.four,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.six,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  funCard: {
+    borderRadius: Radius.lg,
+    backgroundColor: colors.primary,
+    padding: Spacing.four,
+    gap: Spacing.one,
+  },
+  prSection: {
+    gap: Spacing.two,
+  },
+  prRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surface,
+    padding: Spacing.three,
+  },
+  prRowBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   finishedList: {
     gap: Spacing.two,
   },
   finishedExercise: {
     borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  finishedExerciseName: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
   },
 });

@@ -69,7 +69,7 @@ export function ContributionGrid({
         x: week * (cellSize + GAP),
         y: LABEL_HEIGHT + day * (cellSize + GAP),
         fill: minutes > 0 ? filledColor : emptyColor,
-        opacity: minutes === 0 ? 1 : minutes < 30 ? 0.45 : minutes < 45 ? 0.75 : 1,
+        opacity: minutes === 0 ? 1 : minutes < 30 ? 0.65 : minutes < 45 ? 0.9 : 1,
       });
     }
   }

@@ -5,8 +5,15 @@
  * https://wiki.openfoodfacts.org/API
  */
 
-const SEARCH_URL = 'https://world.openfoodfacts.org/cgi/search.pl';
-const FIELDS = 'code,product_name,brands,nutriments,serving_size';
+// The `us` subdomain (rather than `world`) restricts results server-side to
+// products tagged as sold in the United States — OFF is a global crowd-sourced
+// database with no default locale, so querying `world` returns product names
+// in whatever language each contributor entered them in (French, German,
+// Japanese, etc.), which read as "wrong language" noise in an English-only
+// app. This isn't a perfect filter (some US products still carry non-English
+// text), but it's the standard mitigation and cuts the noise substantially.
+const SEARCH_URL = 'https://us.openfoodfacts.org/cgi/search.pl';
+const FIELDS = 'code,product_name,product_name_en,brands,nutriments,serving_size';
 /** Identify the app per OFF API guidelines. */
 const USER_AGENT = 'GitFit/1.0 (personal fitness tracker)';
 
@@ -33,6 +40,7 @@ interface OffNutriments {
 interface OffProduct {
   code?: string;
   product_name?: string;
+  product_name_en?: string;
   brands?: string;
   serving_size?: string;
   nutriments?: OffNutriments;
@@ -43,7 +51,8 @@ interface OffSearchResponse {
 }
 
 function mapProduct(product: OffProduct): FoodSearchResult | null {
-  const name = product.product_name?.trim();
+  // Prefer the explicit English translation when a contributor provided one.
+  const name = product.product_name_en?.trim() || product.product_name?.trim();
   const nutriments = product.nutriments;
   const calories = nutriments?.['energy-kcal_100g'];
   // Skip entries without a name or calorie data — they can't be logged meaningfully.
@@ -72,6 +81,7 @@ export async function searchFoods(query: string, signal?: AbortSignal): Promise<
     json: '1',
     page_size: '25',
     fields: FIELDS,
+    lc: 'en',
   });
   const response = await fetch(`${SEARCH_URL}?${params}`, {
     signal,
@@ -101,8 +111,24 @@ export function gramsToOunces(grams: number): number {
   return grams / GRAMS_PER_OUNCE;
 }
 
+/**
+ * Best-effort grams parsed from OFF's free-text `serving_size` (e.g. "30 g",
+ * "1 cup (240ml)"). Treats ml as approximately equal to grams. Returns null
+ * when nothing parseable is found.
+ */
+export function parseServingGrams(servingSize: string | undefined): number | null {
+  if (!servingSize) return null;
+  const match = servingSize.match(/([\d.]+)\s*(g|ml)\b/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /** Nutrients for `grams` of a food described per 100 g. */
-export function macrosForGrams(food: FoodSearchResult, grams: number) {
+export function macrosForGrams(
+  food: Pick<FoodSearchResult, 'caloriesPer100g' | 'proteinPer100g' | 'carbsPer100g' | 'fatPer100g'>,
+  grams: number,
+) {
   const factor = grams / 100;
   const round = (value: number) => Math.round(value * 10) / 10;
   return {

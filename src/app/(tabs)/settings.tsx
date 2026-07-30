@@ -17,6 +17,7 @@ import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, Radius, Spacing } from '@/constants/theme';
+import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { formatHeight, fromDisplayLength, lengthUnitLabel, toDisplayLength } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
@@ -33,6 +34,7 @@ export default function SettingsScreen() {
   const [info, setInfo] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const scrollRef = useResetScrollOnFocus<ScrollView>();
 
   const email = session?.user.email ?? '';
   const metadata = session?.user.user_metadata ?? {};
@@ -122,7 +124,7 @@ export default function SettingsScreen() {
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView ref={scrollRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <ThemedText type="subtitle">Profile</ThemedText>
 
             <View style={styles.profileRow}>
@@ -233,7 +235,7 @@ export default function SettingsScreen() {
             )}
 
             <View>
-              <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+              <ThemedText type="label" style={styles.sectionLabel}>
                 UNITS
               </ThemedText>
               <ThemedView type="surface" style={[styles.section, styles.row]}>
@@ -359,8 +361,7 @@ const styles = StyleSheet.create({
   },
   editCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.three,
   },
@@ -428,8 +429,7 @@ const styles = StyleSheet.create({
   },
   section: {
     borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     gap: Spacing.half,

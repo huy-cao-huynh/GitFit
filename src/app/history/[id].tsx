@@ -141,8 +141,7 @@ const styles = StyleSheet.create({
   },
   exerciseCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.two,
   },

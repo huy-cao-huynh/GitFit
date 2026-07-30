@@ -93,8 +93,6 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     gap: Spacing.three,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   headerRow: {
     flexDirection: 'row',

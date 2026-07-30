@@ -17,7 +17,7 @@ export function Stepper({
   suffix,
   onChange,
 }: {
-  label: string;
+  label?: string;
   value: number;
   min: number;
   max?: number;
@@ -39,9 +39,11 @@ export function Stepper({
 
   return (
     <View style={styles.stepper}>
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
+      {label ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {label}
+        </ThemedText>
+      ) : null}
       <View style={styles.stepperControls}>
         <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(Math.max(min, currentValue - step))}>
           <SymbolView name="minus" size={12} tintColor={colors.text} />
@@ -107,7 +109,9 @@ const styles = StyleSheet.create({
   stepperValueButton: {
     minWidth: 44,
     paddingHorizontal: Spacing.one,
+    paddingVertical: Spacing.one,
     borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
   },
   stepperValue: {
     minWidth: 44,
@@ -117,7 +121,7 @@ const styles = StyleSheet.create({
     minWidth: 44,
     borderRadius: Radius.sm,
     paddingHorizontal: Spacing.one,
-    paddingVertical: 0,
+    paddingVertical: Spacing.one,
     textAlign: 'center',
     fontFamily: Fonts.bold,
     fontSize: 14,

@@ -60,6 +60,7 @@ function RootNavigator() {
         <Stack.Screen name="cardio-routine/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="food/search" options={{ presentation: 'modal' }} />
         <Stack.Screen name="food/[id]" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="food/goals" options={{ presentation: 'modal' }} />
         <Stack.Screen name="recipes" options={{ presentation: 'modal' }} />
         <Stack.Screen name="recipe/[id]" options={{ presentation: 'modal' }} />
       </Stack.Protected>

@@ -18,12 +18,14 @@ export type ThemedTextProps = TextProps & {
     | 'heading'
     | 'label'
     | 'button'
+    | 'caption'
     | 'stat'
     | 'statLarge'
     | 'statSmall'
     | 'statInline'
     | 'timer'
-    | 'timerSmall';
+    | 'timerSmall'
+    | 'timerXs';
   themeColor?: ThemeColor;
 };
 
@@ -54,12 +56,14 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
         type === 'heading' && styles.heading,
         type === 'label' && styles.label,
         type === 'button' && styles.button,
+        type === 'caption' && styles.caption,
         type === 'stat' && styles.stat,
         type === 'statLarge' && styles.statLarge,
         type === 'statSmall' && styles.statSmall,
         type === 'statInline' && styles.statInline,
         type === 'timer' && styles.timer,
         type === 'timerSmall' && styles.timerSmall,
+        type === 'timerXs' && styles.timerXs,
         style,
       ]}
       {...rest}
@@ -100,10 +104,12 @@ const styles = StyleSheet.create({
   heading: Type.heading,
   label: Type.label,
   button: Type.button,
+  caption: Type.caption,
   stat: Type.statMd,
   statLarge: Type.statLg,
   statSmall: Type.statSm,
   statInline: Type.statXs,
   timer: Type.timerLg,
   timerSmall: Type.timerSm,
+  timerXs: Type.timerXs,
 });

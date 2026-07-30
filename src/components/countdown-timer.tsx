@@ -7,6 +7,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { ThemedText } from '@/components/themed-text';
 import { TimerText } from '@/components/timer-text';
 import { Colors, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -52,17 +53,17 @@ export function CountdownTimer({
       setRemaining(left);
       if (left !== lastHaptic.current) {
         if (left === 10 && seconds >= 20) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          haptics.impact(Haptics.ImpactFeedbackStyle.Medium);
           lastHaptic.current = left;
         } else if (left >= 1 && left <= 3) {
-          Haptics.selectionAsync();
+          haptics.selection();
           lastHaptic.current = left;
         }
       }
       if (left === 0 && !called.current) {
         called.current = true;
         clearInterval(interval);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        haptics.notification(Haptics.NotificationFeedbackType.Success);
         onDone();
       }
     }, 250);
@@ -101,7 +102,7 @@ export function CountdownTimer({
           />
         </Svg>
         <View style={styles.timerLabel}>
-          <TimerText seconds={remaining} size="sm" ticking />
+          <TimerText seconds={remaining} size="sm" />
         </View>
       </View>
       {nextLabel ? (

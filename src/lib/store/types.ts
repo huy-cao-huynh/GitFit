@@ -6,20 +6,21 @@
 
 export type ExerciseKind = 'reps' | 'time';
 
+/** One planned set within a `RoutineExercise`, independently editable so pyramid sets (different weight per set) are possible. */
+export interface RoutineSet {
+  id: string;
+  isWarmup: boolean;
+  reps?: number;
+  weight?: number;
+  durationSec?: number;
+}
+
 export interface RoutineExercise {
   id: string;
   name: string;
   kind?: ExerciseKind;
-  warmupSets?: number;
-  warmupTargetReps?: number;
-  warmupTargetWeight?: number;
-  warmupTargetDurationSec?: number;
-  warmupRestSec?: number;
-  sets: number;
-  targetReps: number;
-  targetWeight: number;
-  targetDurationSec?: number;
-  targetRestSec?: number;
+  sets: RoutineSet[];
+  restSec?: number;
   lastTime: { reps?: number; weight?: number; durationSec?: number } | null;
 }
 
@@ -86,10 +87,10 @@ export interface CardioSession {
 }
 
 /**
- * How a goal's weekly progress is computed. The four built-ins derive from
- * logged data; 'manual' goals count the user's own check-ins (goal_entries).
+ * How a goal's weekly progress is computed. The built-ins derive from logged
+ * data; 'manual' goals count the user's own check-ins (goal_entries).
  */
-export type GoalMetric = 'workouts' | 'calories' | 'cardio' | 'water' | 'manual';
+export type GoalMetric = 'workouts' | 'calories' | 'cardio' | 'water' | 'steps' | 'bodyweight' | 'manual';
 
 /** A single modular weekly-goal slot; the Dashboard renders one ring per active goal. */
 export interface GoalDef {

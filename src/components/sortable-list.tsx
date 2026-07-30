@@ -21,7 +21,8 @@ interface SortableListProps<T> {
   items: T[];
   keyFor: (item: T) => string;
   rowHeight: number;
-  renderRow: (item: T) => ReactNode;
+  /** `dragHandle` is a ready-to-place drag affordance — render it inside your own row container rather than beside it. */
+  renderRow: (item: T, dragHandle: ReactNode) => ReactNode;
   /** Called with the item keys in their new order after a drag ends. */
   onOrderChange: (orderedKeys: string[]) => void;
 }
@@ -58,7 +59,7 @@ export function SortableList<T>({ items, keyFor, rowHeight, renderRow, onOrderCh
           rowHeight={rowHeight}
           count={items.length}
           onCommit={commit}>
-          {renderRow(item)}
+          {(dragHandle) => renderRow(item, dragHandle)}
         </SortableRow>
       ))}
     </View>
@@ -80,7 +81,7 @@ function SortableRow({
   rowHeight: number;
   count: number;
   onCommit: () => void;
-  children: ReactNode;
+  children: (dragHandle: ReactNode) => ReactNode;
 }) {
   const isActive = useSharedValue(false);
   const startY = useSharedValue(0);
@@ -126,16 +127,15 @@ function SortableRow({
     zIndex: isActive.value ? 10 : 0,
   }));
 
-  return (
-    <Animated.View style={[styles.row, { height: rowHeight }, animatedStyle]}>
-      <View style={styles.content}>{children}</View>
-      <GestureDetector gesture={pan}>
-        <View style={styles.handle} hitSlop={8}>
-          <SymbolView name="line.3.horizontal" size={18} tintColor={Colors.textSecondary} />
-        </View>
-      </GestureDetector>
-    </Animated.View>
+  const dragHandle = (
+    <GestureDetector gesture={pan}>
+      <View style={styles.handle} hitSlop={8}>
+        <SymbolView name="line.3.horizontal" size={18} tintColor={Colors.textSecondary} />
+      </View>
+    </GestureDetector>
   );
+
+  return <Animated.View style={[styles.row, { height: rowHeight }, animatedStyle]}>{children(dragHandle)}</Animated.View>;
 }
 
 const styles = StyleSheet.create({
@@ -143,12 +143,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  content: {
-    flex: 1,
   },
   handle: {
     paddingHorizontal: Spacing.two,

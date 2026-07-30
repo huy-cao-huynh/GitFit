@@ -5,9 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
 import { ScheduleDaySelector } from '@/components/schedule-day-selector';
+import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { ACTIVITY_ICONS } from '@/lib/activity-icons';
 import { makeId } from '@/lib/store/id';
 import type { CardioActivityType, Routine, Weekday } from '@/lib/store/types';
 import { distanceUnitLabel, fromDisplayDistance, toDisplayDistance } from '@/lib/units';
@@ -37,8 +39,9 @@ export default function CardioRoutineEditorScreen() {
   const [name, setName] = useState(existing?.name ?? '');
   const [activityType, setActivityType] = useState<CardioActivityType>(existing?.activityType ?? 'run');
   const [scheduledDays, setScheduledDays] = useState<Weekday[]>(existing?.scheduledDays ?? []);
-  const [targetMinutes, setTargetMinutes] = useState(existing?.durationMinutes ?? 30);
+  const [hasTargetTime, setHasTargetTime] = useState(true);
   const [hasTargetDistance, setHasTargetDistance] = useState(existing?.targetDistanceMiles !== undefined);
+  const [targetMinutes, setTargetMinutes] = useState(existing?.durationMinutes ?? 30);
   const [targetDistanceDisplay, setTargetDistanceDisplay] = useState(
     existing?.targetDistanceMiles ? toDisplayDistance(existing.targetDistanceMiles, unitSystem) : 2,
   );
@@ -101,7 +104,7 @@ export default function CardioRoutineEditorScreen() {
 
           <ScheduleDaySelector selectedDays={scheduledDays} onChange={setScheduledDays} />
 
-          <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+          <ThemedText type="label" style={styles.sectionLabel}>
             ACTIVITY
           </ThemedText>
           <View style={styles.activityGrid}>
@@ -112,6 +115,11 @@ export default function CardioRoutineEditorScreen() {
                   key={option}
                   style={[styles.activityChip, active && styles.activityChipActive]}
                   onPress={() => setActivityType(option)}>
+                  <SymbolView
+                    name={ACTIVITY_ICONS[option]}
+                    size={14}
+                    tintColor={active ? colors.onPrimary : colors.textSecondary}
+                  />
                   <ThemedText type="small" style={active ? { color: colors.onPrimary } : undefined}>
                     {ACTIVITY_LABELS[option]}
                   </ThemedText>
@@ -120,35 +128,64 @@ export default function CardioRoutineEditorScreen() {
             })}
           </View>
 
-          <ThemedView type="surface" style={styles.card}>
-            <Stepper
-              label="Target time"
-              value={targetMinutes}
-              min={5}
-              step={5}
-              suffix="min"
-              onChange={setTargetMinutes}
-            />
-            <View style={[styles.distanceRow, styles.rowDivider]}>
-              <Pressable style={styles.goalToggle} onPress={() => setHasTargetDistance((v) => !v)} hitSlop={6}>
-                <View style={[styles.checkCircle, hasTargetDistance ? { backgroundColor: colors.primary } : styles.checkCircleOff]}>
-                  {hasTargetDistance && <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} />}
+          <ThemedText type="label" style={styles.sectionLabel}>
+            TARGET
+          </ThemedText>
+          <View style={styles.targetKindRow}>
+            <Pressable
+              style={[styles.targetKindButton, hasTargetTime && styles.targetKindButtonActive]}
+              onPress={() => setHasTargetTime((v) => !v)}>
+              <SymbolView
+                name="clock.fill"
+                size={16}
+                tintColor={hasTargetTime ? colors.onPrimary : colors.textSecondary}
+              />
+              <ThemedText type="smallBold" style={hasTargetTime ? { color: colors.onPrimary } : undefined}>
+                Target Time
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              style={[styles.targetKindButton, hasTargetDistance && styles.targetKindButtonActive]}
+              onPress={() => setHasTargetDistance((v) => !v)}>
+              <SymbolView
+                name="ruler.fill"
+                size={16}
+                tintColor={hasTargetDistance ? colors.onPrimary : colors.textSecondary}
+              />
+              <ThemedText type="smallBold" style={hasTargetDistance ? { color: colors.onPrimary } : undefined}>
+                Target Distance
+              </ThemedText>
+            </Pressable>
+          </View>
+
+          {(hasTargetTime || hasTargetDistance) && (
+            <ThemedView type="surface" style={styles.card}>
+              {hasTargetTime && (
+                <View style={styles.stepperRow}>
+                  <Stepper
+                    label="Target time"
+                    value={targetMinutes}
+                    min={5}
+                    step={5}
+                    suffix="min"
+                    onChange={setTargetMinutes}
+                  />
                 </View>
-                <ThemedText type="small">Target distance</ThemedText>
-              </Pressable>
-              {hasTargetDistance && (
-                <Stepper
-                  label=""
-                  value={targetDistanceDisplay}
-                  min={0.25}
-                  step={0.25}
-                  suffix={distanceUnitLabel(unitSystem)}
-                  onChange={setTargetDistanceDisplay}
-                  compact
-                />
               )}
-            </View>
-          </ThemedView>
+              {hasTargetDistance && (
+                <View style={[styles.stepperRow, hasTargetTime && styles.stepperRowDivider]}>
+                  <Stepper
+                    label="Target distance"
+                    value={targetDistanceDisplay}
+                    min={0.25}
+                    step={0.25}
+                    suffix={distanceUnitLabel(unitSystem)}
+                    onChange={setTargetDistanceDisplay}
+                  />
+                </View>
+              )}
+            </ThemedView>
+          )}
 
           {existing && (
             <Pressable style={styles.deleteButton} onPress={handleDelete}>
@@ -161,55 +198,6 @@ export default function CardioRoutineEditorScreen() {
       </SafeAreaView>
     </ThemedView>
   );
-}
-
-function Stepper({
-  label,
-  value,
-  min,
-  step,
-  suffix,
-  onChange,
-  compact,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  step: number;
-  suffix?: string;
-  onChange: (value: number) => void;
-  compact?: boolean;
-}) {
-  return (
-    <View style={compact ? styles.stepperCompact : styles.stepper}>
-      {!!label && (
-        <ThemedText type="small" themeColor="textSecondary">
-          {label}
-        </ThemedText>
-      )}
-      <View style={styles.stepperControls}>
-        <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(Math.max(min, round2(value - step)))}>
-          <SymbolView name="minus" size={12} tintColor={colors.text} />
-        </Pressable>
-        <ThemedText type="smallBold" style={styles.stepperValue}>
-          {value}
-          {suffix ? (
-            <ThemedText type="small" themeColor="textSecondary">
-              {' '}
-              {suffix}
-            </ThemedText>
-          ) : null}
-        </ThemedText>
-        <Pressable hitSlop={6} style={styles.stepperButton} onPress={() => onChange(round2(value + step))}>
-          <SymbolView name="plus" size={12} tintColor={colors.text} />
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 const styles = StyleSheet.create({
@@ -254,6 +242,9 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   activityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
     borderRadius: Radius.full,
@@ -262,61 +253,34 @@ const styles = StyleSheet.create({
   activityChipActive: {
     backgroundColor: colors.primary,
   },
+  targetKindRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  targetKindButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+  },
+  targetKindButtonActive: {
+    backgroundColor: colors.primary,
+  },
   card: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: Spacing.three,
   },
-  stepper: {
-    paddingVertical: Spacing.three,
-    gap: Spacing.one,
-  },
-  stepperCompact: {
-    alignItems: 'center',
-  },
-  stepperControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  stepperButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperValue: {
-    minWidth: 56,
-    textAlign: 'center',
-  },
-  distanceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  stepperRow: {
     paddingVertical: Spacing.three,
   },
-  rowDivider: {
+  stepperRowDivider: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-  },
-  goalToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  checkCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkCircleOff: {
-    borderWidth: 2,
-    borderColor: colors.border,
   },
   deleteButton: {
     borderRadius: Radius.md,

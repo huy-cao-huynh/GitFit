@@ -1,58 +1,82 @@
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { AnimatedNumber } from '@/components/animated-number';
 import { ScreenBackground } from '@/components/screen-background';
-import { Stepper } from '@/components/stepper';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { WaterBottle } from '@/components/water-bottle';
+import { BottomTabInset, Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
 import {
   dayLabel,
+  DEFAULT_NUTRITION_GOALS,
   MEAL_LABELS,
   MEAL_ORDER,
   nutritionForDate,
   shiftDateKey,
   todayKey,
+  todayWaterOunces,
 } from '@/lib/store/derive';
-import type { FoodLogEntry, MealType, NutritionGoals } from '@/lib/store/types';
+import { makeId } from '@/lib/store/id';
+import type { FoodLogEntry, MealType } from '@/lib/store/types';
+import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
+import { fromDisplayVolume, toDisplayVolume, volumeUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
-
-/** Shown (and written on first edit) until the user sets their own targets. */
-const DEFAULT_GOALS: NutritionGoals = { calories: 2000, proteinG: 140, carbsG: 220, fatG: 65 };
+const WATER_QUICK_ADD_IMPERIAL = 16;
+const WATER_QUICK_ADD_METRIC = 500;
 
 export default function NutritionScreen() {
-  const { foodLogs, nutritionGoals, setNutritionGoals, deleteFoodLog } = useStore();
+  const { foodLogs, nutritionGoals, deleteFoodLog, goals: userGoals, waterEntries, addWaterEntry, preferences } =
+    useStore();
+  const scrollRef = useResetScrollOnFocus<ScrollView>();
   const [date, setDate] = useState(todayKey());
-  const [editingGoals, setEditingGoals] = useState(false);
 
-  const goals = nutritionGoals ?? DEFAULT_GOALS;
+  const goals = nutritionGoals ?? DEFAULT_NUTRITION_GOALS;
   const { totals, byMeal } = nutritionForDate(foodLogs, date);
   const remaining = Math.round(goals.calories - totals.calories);
 
-  const updateGoal = (patch: Partial<NutritionGoals>) => {
-    setNutritionGoals({ ...goals, ...patch });
-  };
+  const unitSystem = preferences.unitSystem;
+  const today = todayKey();
+  const waterGoal = userGoals.find((goal) => goal.metric === 'water');
+  const todayWater = todayWaterOunces(waterEntries);
+  // Same weekly-target → daily-target math as the dashboard's water bento tile
+  // (dashboard.tsx), so the two widgets never disagree.
+  const dailyWaterTarget = waterGoal ? Math.max(1, Math.round(waterGoal.target / 7)) : 0;
+  const quickAdd = unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL;
 
   const goToSearch = (meal: MealType) =>
     router.push({ pathname: '/food/search', params: { date, meal } });
+
+  const addWater = (displayAmount: number) => {
+    let deltaOunces = Math.round(fromDisplayVolume(displayAmount, unitSystem));
+    if (deltaOunces < 0) deltaOunces = Math.max(deltaOunces, -todayWater);
+    if (deltaOunces === 0) return;
+    addWaterEntry({ id: makeId(), date: today, ounces: deltaOunces });
+  };
 
   return (
     <TabFadeView style={styles.container}>
       <ScreenBackground>
         <SafeAreaView edges={['top']} style={styles.safeArea}>
           <ScrollView
+            ref={scrollRef}
             style={styles.scroll}
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}>
             <View style={styles.headerRow}>
-              <ThemedText type="subtitle">Nutrition</ThemedText>
+              <View>
+                <ThemedText type="subtitle">Nutrition</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Log meals and track your macros
+                </ThemedText>
+              </View>
               <Pressable hitSlop={8} onPress={() => router.push('/recipes')}>
                 <ThemedText type="linkPrimary">Recipes</ThemedText>
               </Pressable>
@@ -89,81 +113,26 @@ export default function NutritionScreen() {
                     / <ThemedText type="statInline">{Math.round(goals.calories)}</ThemedText> cal
                   </ThemedText>
                 </View>
-                <Pressable hitSlop={8} onPress={() => setEditingGoals((editing) => !editing)}>
-                  <SymbolView
-                    name={editingGoals ? 'checkmark.circle.fill' : 'pencil.circle'}
-                    size={22}
-                    tintColor={colors.primaryLight}
-                  />
+                <Pressable hitSlop={8} onPress={() => router.push('/food/goals')}>
+                  <SymbolView name="pencil.circle" size={22} tintColor={colors.primaryLight} />
                 </Pressable>
               </View>
-              <ThemedText type="small" themeColor={remaining >= 0 ? 'text' : 'warning'}>
-                <ThemedText type="statInline" themeColor={remaining >= 0 ? 'text' : 'warning'}>
-                  {Math.abs(remaining)}
-                </ThemedText>
-                {remaining >= 0 ? ' cal remaining' : ' cal over target'}
-              </ThemedText>
+              <RemainingCalories date={date} remaining={remaining} />
 
               {/* Lime for protein, then down the neutral ramp — the three bars
                   read apart without a second hue. */}
               <MacroBar label="Protein" value={totals.proteinG} target={goals.proteinG} color={colors.primary} />
               <MacroBar label="Carbs" value={totals.carbsG} target={goals.carbsG} color={colors.text} />
               <MacroBar label="Fat" value={totals.fatG} target={goals.fatG} color={colors.textSecondary} />
-
-              {editingGoals && (
-                <View style={styles.goalEditor}>
-                  <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
-                    DAILY TARGETS
-                  </ThemedText>
-                  <View style={styles.goalStepperRow}>
-                    <Stepper
-                      label="Calories"
-                      value={goals.calories}
-                      min={800}
-                      max={8000}
-                      step={50}
-                      onChange={(calories) => updateGoal({ calories })}
-                    />
-                    <Stepper
-                      label="Protein g"
-                      value={goals.proteinG}
-                      min={0}
-                      max={500}
-                      step={5}
-                      onChange={(proteinG) => updateGoal({ proteinG })}
-                    />
-                  </View>
-                  <View style={styles.goalStepperRow}>
-                    <Stepper
-                      label="Carbs g"
-                      value={goals.carbsG}
-                      min={0}
-                      max={800}
-                      step={5}
-                      onChange={(carbsG) => updateGoal({ carbsG })}
-                    />
-                    <Stepper
-                      label="Fat g"
-                      value={goals.fatG}
-                      min={0}
-                      max={300}
-                      step={5}
-                      onChange={(fatG) => updateGoal({ fatG })}
-                    />
-                  </View>
-                </View>
-              )}
             </ThemedView>
 
             {MEAL_ORDER.map((meal) => {
               const entries = byMeal[meal];
-              const mealCalories = Math.round(
-                entries.reduce((sum, entry) => sum + entry.calories, 0),
-              );
+              const mealCalories = Math.round(entries.reduce((sum, entry) => sum + entry.calories, 0));
               return (
                 <View key={meal} style={styles.mealSection}>
                   <View style={styles.mealHeader}>
-                    <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+                    <ThemedText type="label" style={styles.sectionLabel}>
                       {MEAL_LABELS[meal].toUpperCase()}
                     </ThemedText>
                     {mealCalories > 0 && (
@@ -193,11 +162,77 @@ export default function NutritionScreen() {
                 </View>
               );
             })}
+
+            {waterGoal && (
+              <>
+                <ThemedText type="label" style={styles.sectionLabel}>
+                  WATER
+                </ThemedText>
+                <ThemedView type="surface" style={styles.waterCard}>
+                  <View style={styles.waterTopRow}>
+                    <WaterBottle
+                      progress={dailyWaterTarget > 0 ? todayWater / dailyWaterTarget : 0}
+                      size={64}
+                    />
+                    <View style={styles.waterStats}>
+                      <ThemedText type="subtitle">
+                        {toDisplayVolume(todayWater, unitSystem)}
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {' '}
+                          / {toDisplayVolume(dailyWaterTarget, unitSystem)} {volumeUnitLabel(unitSystem)}
+                        </ThemedText>
+                      </ThemedText>
+                      <View style={styles.waterButtonRow}>
+                        <Pressable style={styles.waterMinusButton} onPress={() => addWater(-quickAdd)}>
+                          <ThemedText type="smallBold" themeColor="textSecondary">
+                            −{quickAdd} {volumeUnitLabel(unitSystem)}
+                          </ThemedText>
+                        </Pressable>
+                        <Pressable style={styles.quickAddButton} onPress={() => addWater(quickAdd)}>
+                          <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
+                            +{quickAdd} {volumeUnitLabel(unitSystem)}
+                          </ThemedText>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                </ThemedView>
+              </>
+            )}
           </ScrollView>
         </SafeAreaView>
       </ScreenBackground>
     </TabFadeView>
   );
+}
+
+/** Cross-fades the "remaining"/"over target" line when the viewed day changes. */
+function RemainingCalories({ date, remaining }: { date: string; remaining: number }) {
+  const opacity = useSharedValue(1);
+  useEffect(() => {
+    opacity.set(0);
+    opacity.set(withTiming(1, { duration: Motion.base }));
+  }, [date, opacity]);
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: opacity.get() }));
+
+  return (
+    <Animated.View style={fadeStyle}>
+      <ThemedText type="small" themeColor={remaining >= 0 ? 'text' : 'warning'}>
+        <ThemedText type="statInline" themeColor={remaining >= 0 ? 'text' : 'warning'}>
+          {Math.abs(remaining)}
+        </ThemedText>
+        {remaining >= 0 ? ' cal remaining' : ' cal over target'}
+      </ThemedText>
+    </Animated.View>
+  );
+}
+
+/** Brand + serving size only — macro breakdown now lives once per meal, not per item. */
+function servingLabel(entry: FoodLogEntry): string {
+  const parts = [entry.brand, entry.grams !== undefined ? `${Math.round(entry.grams)} g` : undefined].filter(
+    (part): part is string => !!part,
+  );
+  return parts.join(' · ');
 }
 
 function FoodRow({
@@ -209,6 +244,7 @@ function FoodRow({
   divider: boolean;
   onDelete: () => void;
 }) {
+  const serving = servingLabel(entry);
   return (
     <Pressable
       style={[styles.foodRow, divider && styles.rowDivider]}
@@ -217,11 +253,11 @@ function FoodRow({
         <ThemedText type="smallBold" numberOfLines={1}>
           {entry.name}
         </ThemedText>
-        <ThemedText type="small" numberOfLines={1}>
-          {entry.brand ? `${entry.brand} · ` : ''}
-          {entry.grams !== undefined ? `${Math.round(entry.grams)} g · ` : ''}
-          {Math.round(entry.proteinG)}p / {Math.round(entry.carbsG)}c / {Math.round(entry.fatG)}f
-        </ThemedText>
+        {serving && (
+          <ThemedText type="small" numberOfLines={1} themeColor="textSecondary">
+            {serving}
+          </ThemedText>
+        )}
       </View>
       <ThemedText type="statInline">{Math.round(entry.calories)}</ThemedText>
       <ThemedText type="small">cal</ThemedText>
@@ -244,6 +280,12 @@ function MacroBar({
   color: string;
 }) {
   const progress = target > 0 ? Math.min(1, value / target) : 0;
+  const fill = useSharedValue(0);
+  useEffect(() => {
+    fill.set(withTiming(progress, { duration: Motion.base }));
+  }, [progress, fill]);
+  const fillStyle = useAnimatedStyle(() => ({ width: `${fill.get() * 100}%` }));
+
   return (
     <View style={styles.macroBar}>
       <View style={styles.macroLabels}>
@@ -257,7 +299,7 @@ function MacroBar({
         </ThemedText>
       </View>
       <View style={styles.macroTrack}>
-        <View style={[styles.macroFill, { width: `${progress * 100}%`, backgroundColor: color }]} />
+        <Animated.View style={[styles.macroFill, fillStyle, { backgroundColor: color }]} />
       </View>
     </View>
   );
@@ -310,10 +352,45 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.two,
+  },
+  waterCard: {
+    borderRadius: Radius.lg,
+    backgroundColor: colors.surface,
+    paddingHorizontal: Spacing.three,
+  },
+  waterTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.three,
+  },
+  waterStats: {
+    flex: 1,
+    gap: Spacing.two,
+    alignItems: 'flex-start',
+  },
+  waterButtonRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  quickAddButton: {
+    alignItems: 'center',
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+  },
+  waterMinusButton: {
+    alignItems: 'center',
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   summaryHeader: {
     flexDirection: 'row',
@@ -324,16 +401,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: Spacing.one,
-  },
-  goalEditor: {
-    gap: Spacing.two,
-    paddingTop: Spacing.two,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  goalStepperRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
   },
   sectionLabel: {
     textTransform: 'uppercase',
@@ -348,8 +415,7 @@ const styles = StyleSheet.create({
   },
   mealCard: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: Spacing.three,
   },
   foodRow: {

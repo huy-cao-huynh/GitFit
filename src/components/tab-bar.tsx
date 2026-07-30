@@ -1,16 +1,14 @@
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
-import * as Haptics from 'expo-haptics';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Fonts, Motion, TabBarHeight } from '@/constants/theme';
+import { Colors, Fonts, Motion, Spacing, TabBarHeight } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 
 const INDICATOR_HEIGHT = 3;
-/** Inactive tabs dim by opacity — everything on the lime block is onPrimary. */
-const INACTIVE_OPACITY = 0.45;
 
 const TAB_ICONS: Record<string, SFSymbol> = {
   dashboard: 'house.fill',
@@ -22,9 +20,11 @@ const TAB_ICONS: Record<string, SFSymbol> = {
 };
 
 /**
- * Grounded tab bar: a solid lime block running the full width of the screen,
- * flush to the bottom edge. The active tab is marked by a dark bar on the top
- * edge that slides between tabs — no floating pill, no bubble.
+ * Grounded tab bar: a solid black block running the full width of the screen,
+ * flush to the bottom edge, with the icon group sitting low near the home
+ * indicator. The active tab is marked by lime — a lime bar on the top edge
+ * that slides between tabs, plus a lime icon and label. No floating pill, no
+ * bubble. Inactive tabs are white, recessed by opacity alone.
  */
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -63,7 +63,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             canPreventDefault: true,
           });
           if (!isFocused && !event.defaultPrevented) {
-            Haptics.selectionAsync();
+            haptics.selection();
             navigation.navigate(route.name);
           }
         };
@@ -79,7 +79,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             <SymbolView
               name={TAB_ICONS[route.name] ?? 'circle'}
               size={22}
-              tintColor={Colors.onPrimary}
+              tintColor={isFocused ? Colors.primary : Colors.text}
             />
             <Text style={[styles.label, isFocused && styles.labelActive]}>{label}</Text>
           </Pressable>
@@ -97,29 +97,33 @@ const styles = StyleSheet.create({
     bottom: 0,
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.tabBarBackground,
   },
   indicator: {
     position: 'absolute',
     top: 0,
     height: INDICATOR_HEIGHT,
-    backgroundColor: Colors.onPrimary,
+    backgroundColor: Colors.primary,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    // Bottom-aligned rather than centred: the icon group sits low, close to the
+    // home indicator, so the shortened bar reads as grounded instead of padded.
+    justifyContent: 'flex-end',
+    paddingBottom: Spacing.two,
     gap: 3,
   },
   tabInactive: {
-    opacity: INACTIVE_OPACITY,
+    opacity: 0.7,
   },
   label: {
     fontFamily: Fonts.medium,
     fontSize: 10,
-    color: Colors.onPrimary,
+    color: Colors.text,
   },
   labelActive: {
     fontFamily: Fonts.bold,
+    color: Colors.primary,
   },
 });

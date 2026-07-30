@@ -1,7 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -17,10 +18,13 @@ import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { macrosForGrams, searchFoods, type FoodSearchResult } from '@/lib/nutrition/open-food-facts';
 import { recipeTotals, scaleMacros } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { RecipeIngredient } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
+
+const SEARCH_DEBOUNCE_MS = 400;
 
 const colors = Colors;
 
@@ -74,6 +78,7 @@ export default function RecipeEditorScreen() {
   const [ingredients, setIngredients] = useState<IngredientDraft[]>(
     existing ? existing.ingredients.map(toDraft) : [emptyDraft()],
   );
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const parsed = ingredients.map(fromDraft).filter((ingredient) => ingredient.name.length > 0);
   const totals = recipeTotals({ id: '', name: '', servings: 1, ingredients: parsed });
@@ -152,7 +157,7 @@ export default function RecipeEditorScreen() {
               </View>
             </ThemedView>
 
-            <ThemedText type="label" themeColor="textSecondary" style={styles.sectionLabel}>
+            <ThemedText type="label" style={styles.sectionLabel}>
               INGREDIENTS
             </ThemedText>
 
@@ -204,14 +209,32 @@ export default function RecipeEditorScreen() {
               </ThemedView>
             ))}
 
-            <Pressable
-              style={styles.addRow}
-              onPress={() => setIngredients((current) => [...current, emptyDraft()])}>
-              <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
-              <ThemedText type="small" style={{ color: colors.primaryLight }}>
-                Add ingredient
-              </ThemedText>
-            </Pressable>
+            {pickerOpen ? (
+              <IngredientPicker
+                onAdd={(draft) => {
+                  setIngredients((current) => [...current, draft]);
+                  setPickerOpen(false);
+                }}
+                onCancel={() => setPickerOpen(false)}
+              />
+            ) : (
+              <View style={styles.addIngredientRow}>
+                <Pressable
+                  style={styles.addRow}
+                  onPress={() => setIngredients((current) => [...current, emptyDraft()])}>
+                  <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+                  <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                    Add ingredient
+                  </ThemedText>
+                </Pressable>
+                <Pressable style={styles.addRow} onPress={() => setPickerOpen(true)}>
+                  <SymbolView name="magnifyingglass.circle.fill" size={20} tintColor={colors.primaryLight} />
+                  <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                    Search ingredient
+                  </ThemedText>
+                </Pressable>
+              </View>
+            )}
 
             {!isNew && (
               <Pressable style={styles.deleteButton} onPress={confirmDelete}>
@@ -223,6 +246,125 @@ export default function RecipeEditorScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+    </ThemedView>
+  );
+}
+
+/** Search Open Food Facts for an ingredient and pick a gram amount, as an alternative to typing macros by hand. */
+function IngredientPicker({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (draft: IngredientDraft) => void;
+  onCancel: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<FoodSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<FoodSearchResult | null>(null);
+  const [gramsText, setGramsText] = useState('100');
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    const timer = setTimeout(
+      async () => {
+        abortRef.current?.abort();
+        if (trimmed.length < 2) {
+          setResults([]);
+          setSearching(false);
+          return;
+        }
+        const controller = new AbortController();
+        abortRef.current = controller;
+        setSearching(true);
+        try {
+          const found = await searchFoods(trimmed, controller.signal);
+          if (!controller.signal.aborted) {
+            setResults(found);
+            setSearching(false);
+          }
+        } catch {
+          if (!controller.signal.aborted) setSearching(false);
+        }
+      },
+      trimmed.length < 2 ? 0 : SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  if (picked) {
+    const grams = Number(gramsText) || 0;
+    const macros = macrosForGrams(picked, grams);
+    return (
+      <ThemedView type="surface" style={styles.card}>
+        <View style={styles.ingredientHeader}>
+          <ThemedText type="smallBold" style={styles.flex} numberOfLines={1}>
+            {picked.name}
+          </ThemedText>
+          <Pressable hitSlop={8} onPress={() => setPicked(null)}>
+            <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
+          </Pressable>
+        </View>
+        <MacroInput label="Grams" value={gramsText} onChangeText={setGramsText} />
+        <ThemedText type="small" themeColor="textSecondary">
+          {Math.round(macros.calories)} cal · {Math.round(macros.proteinG)}p {Math.round(macros.carbsG)}c{' '}
+          {Math.round(macros.fatG)}f
+        </ThemedText>
+        <Pressable
+          style={[styles.pickerConfirmButton, grams <= 0 && styles.disabledButton]}
+          disabled={grams <= 0}
+          onPress={() =>
+            onAdd({
+              id: makeId(),
+              name: picked.name,
+              grams: gramsText,
+              calories: String(macros.calories),
+              proteinG: String(macros.proteinG),
+              carbsG: String(macros.carbsG),
+              fatG: String(macros.fatG),
+            })
+          }>
+          <ThemedText type="smallBold" style={styles.primaryButtonText}>
+            Add Ingredient
+          </ThemedText>
+        </Pressable>
+      </ThemedView>
+    );
+  }
+
+  return (
+    <ThemedView type="surface" style={styles.card}>
+      <View style={styles.ingredientHeader}>
+        <TextInput
+          style={[styles.textInput, styles.flex]}
+          placeholder="Search foods…"
+          placeholderTextColor={colors.textSecondary}
+          value={query}
+          onChangeText={setQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus
+        />
+        <Pressable hitSlop={8} onPress={onCancel}>
+          <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
+        </Pressable>
+      </View>
+      {searching && <ActivityIndicator color={colors.primaryLight} />}
+      {results.map((result) => (
+        <Pressable key={result.code} style={styles.pickerResultRow} onPress={() => setPicked(result)}>
+          <View style={styles.flex}>
+            <ThemedText type="smallBold" numberOfLines={1}>
+              {result.name}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+              {result.brand ? `${result.brand} · ` : ''}
+              {Math.round(result.caloriesPer100g)} cal / 100 g
+            </ThemedText>
+          </View>
+          <SymbolView name="plus.circle.fill" size={18} tintColor={colors.primaryLight} />
+        </Pressable>
+      ))}
     </ThemedView>
   );
 }
@@ -293,8 +435,7 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: Spacing.three,
     gap: Spacing.two,
   },
@@ -340,6 +481,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     paddingVertical: Spacing.two,
+  },
+  addIngredientRow: {
+    flexDirection: 'row',
+    gap: Spacing.four,
+  },
+  pickerResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.two,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  pickerConfirmButton: {
+    borderRadius: Radius.md,
+    backgroundColor: colors.primary,
+    paddingVertical: Spacing.two,
+    alignItems: 'center',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  primaryButtonText: {
+    color: colors.onPrimary,
   },
   deleteButton: {
     alignItems: 'center',

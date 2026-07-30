@@ -4,7 +4,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import Svg, { Circle } from 'react-native-svg';
 
 import { Motion } from '@/constants/theme';
 
@@ -12,8 +12,6 @@ export interface ActivityRing {
   progress: number;
   color: string;
   trackColor: string;
-  /** Optional same-hue gradient stops for the progress stroke — subtle sheen only. */
-  gradient?: readonly [string, string];
 }
 
 export interface ActivityRingsProps {
@@ -41,16 +39,6 @@ export function ActivityRings({ rings, size = 128, strokeWidth = 11, gap = 3, an
 
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`} style={{ transform: [{ rotate: '-90deg' }] }}>
-      <Defs>
-        {rings.map((ring, index) =>
-          ring.gradient ? (
-            <LinearGradient key={index} id={`ring-${index}`} x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor={ring.gradient[0]} />
-              <Stop offset="1" stopColor={ring.gradient[1]} />
-            </LinearGradient>
-          ) : null,
-        )}
-      </Defs>
       {rings.map((ring, index) => {
         const radius = outerRadius - index * step;
         const circumference = 2 * Math.PI * radius;
@@ -63,7 +51,7 @@ export function ActivityRings({ rings, size = 128, strokeWidth = 11, gap = 3, an
               animated={animated}
               center={center}
               circumference={circumference}
-              color={ring.gradient ? `url(#ring-${index})` : ring.color}
+              color={ring.color}
               progress={progress}
               radius={radius}
               strokeWidth={ringStrokeWidth}
