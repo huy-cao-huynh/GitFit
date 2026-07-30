@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
@@ -15,6 +16,7 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 
 import { AnimatedNumber } from '@/components/animated-number';
 import { BarChart, type BarChartBar } from '@/components/bar-chart';
+import { CardioRow } from '@/components/cardio-row';
 import { ContributionGrid } from '@/components/contribution-grid';
 import { LineChart } from '@/components/line-chart';
 import { RangeToggle } from '@/components/range-toggle';
@@ -24,9 +26,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing, Type } from '@/constants/theme';
 import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
-import type { ProgressPoint, Session, StepsEntry } from '@/lib/store/types';
+import type { CardioSession, ProgressPoint, Session, UnitSystem } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
-import { toDisplayWeight, weightUnitLabel } from '@/lib/units';
+import { distanceUnitLabel, formatPace, toDisplayDistance, toDisplayWeight, weightUnitLabel } from '@/lib/units';
 import { funWeightUnit } from '@/lib/weight-fun-units';
 import { useStore } from '@/providers/store-provider';
 
@@ -39,20 +41,23 @@ const METRIC_RANGE_OPTIONS = (['week', 'month', 'all'] as MetricRange[]).map((id
   label: METRIC_RANGE_LABELS[id],
 }));
 
-type StepsRange = 'week' | 'month' | 'year';
-const STEPS_RANGE_LABELS: Record<StepsRange, string> = { week: 'Week', month: 'Month', year: 'Year' };
-const STEPS_RANGE_OPTIONS = (['week', 'month', 'year'] as StepsRange[]).map((id) => ({
+type TrackingRange = 'week' | 'month' | 'year';
+const TRACKING_RANGE_LABELS: Record<TrackingRange, string> = { week: 'Week', month: 'Month', year: 'Year' };
+const TRACKING_RANGE_OPTIONS = (['week', 'month', 'year'] as TrackingRange[]).map((id) => ({
   id,
-  label: STEPS_RANGE_LABELS[id],
+  label: TRACKING_RANGE_LABELS[id],
 }));
+
+const RUN_METRIC_LABELS = ['Total distance', 'Best pace', 'Longest run'];
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export default function ProgressScreen() {
-  const { sessions, cardioSessions, bodyweight, steps, preferences } = useStore();
+  const { sessions, cardioSessions, bodyweight, preferences } = useStore();
   const unitSystem = preferences.unitSystem;
-  const [stepsRange, setStepsRange] = useState<StepsRange>('week');
+  const [runRange, setRunRange] = useState<TrackingRange>('week');
+  const [runMetricIndex, setRunMetricIndex] = useState(0);
   const [clusterRange, setClusterRange] = useState<MetricRange>('month');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
@@ -60,6 +65,12 @@ export default function ProgressScreen() {
   const scrollRef = useResetScrollOnFocus<ScrollView>();
 
   const latestWeight = bodyweight[bodyweight.length - 1];
+
+  // A short strip of the newest sessions; the full feed lives behind "See all".
+  const recentCardio = useMemo(
+    () => [...cardioSessions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3),
+    [cardioSessions],
+  );
 
   const currentYear = String(new Date().getFullYear());
   const yearSessionCount =
@@ -75,8 +86,9 @@ export default function ProgressScreen() {
       value: toDisplayWeight(point.value, unitSystem),
     }),
   );
-  const stepsBars = buildStepsBars(steps, stepsRange);
-  const stepsLatest = stepsBars.find((bar) => bar.highlighted)?.value ?? 0;
+  const allRunSessions = useMemo(() => cardioSessions.filter((s) => s.activityType === 'run'), [cardioSessions]);
+  const runBars = buildRunBars(cardioSessions, runRange, unitSystem);
+  const runMetrics = runMetricsForRange(cardioSessions, runRange);
   const bodyweightPoints: ProgressPoint[] = filterPoints(
     bodyweight.map((entry) => ({ date: entry.date, value: toDisplayWeight(entry.weight, unitSystem) })),
     clusterRange,
@@ -144,12 +156,26 @@ export default function ProgressScreen() {
           </ThemedText>
 
           <ThemedView type="surface" style={styles.card}>
-            <StatHeader label="Steps" latest={stepsLatest.toLocaleString()} caption={STEPS_RANGE_LABELS[stepsRange].toLowerCase()} />
-            <RangeToggle options={STEPS_RANGE_OPTIONS} value={stepsRange} onChange={setStepsRange} />
-            {chartWidth > 0 && <BarChart bars={stepsBars} width={chartWidth} color={ChartColors.steps} />}
-            {steps.length === 0 && (
+            <View style={styles.statHeader}>
+              <Pressable
+                onPress={() => setRunMetricIndex((index) => (index + 1) % RUN_METRIC_LABELS.length)}
+                hitSlop={8}
+                style={styles.runHeadline}>
+                <View style={styles.runHeadlineLabelRow}>
+                  <ThemedText type="small">{RUN_METRIC_LABELS[runMetricIndex]}</ThemedText>
+                  <SymbolView name="arrow.triangle.2.circlepath" size={11} tintColor={colors.textSecondary} />
+                </View>
+                <ThemedText type="stat">{runHeadlineValue(runMetrics, runMetricIndex, unitSystem)}</ThemedText>
+              </Pressable>
+              <ThemedText type="statInline" themeColor="textSecondary">
+                {TRACKING_RANGE_LABELS[runRange].toLowerCase()}
+              </ThemedText>
+            </View>
+            <RangeToggle options={TRACKING_RANGE_OPTIONS} value={runRange} onChange={setRunRange} />
+            {chartWidth > 0 && <BarChart bars={runBars} width={chartWidth} color={ChartColors.cardio} />}
+            {allRunSessions.length === 0 && (
               <ThemedText type="small" themeColor="textSecondary">
-                Steps sync once Apple Health is connected.
+                Log a run to see your trends here.
               </ThemedText>
             )}
           </ThemedView>
@@ -212,6 +238,24 @@ export default function ProgressScreen() {
                 trailingIcon="arrow.triangle.2.circlepath"
               />
             </View>
+          )}
+
+          {recentCardio.length > 0 && (
+            <>
+              <View style={styles.sectionHeaderRow}>
+                <ThemedText type="label" style={styles.sectionLabel}>
+                  RUNS
+                </ThemedText>
+                <Pressable onPress={() => router.push('/history/cardio')} hitSlop={8}>
+                  <ThemedText type="linkPrimary">See all</ThemedText>
+                </Pressable>
+              </View>
+              <View style={styles.runList}>
+                {recentCardio.map((session) => (
+                  <CardioRow key={session.id} session={session} unitSystem={unitSystem} />
+                ))}
+              </View>
+            </>
           )}
         </ScrollView>
         </KeyboardAvoidingView>
@@ -331,12 +375,37 @@ function aggregateByDate<T extends { date: string }>(entries: T[], valueFor: (en
     .map(([date, value]) => ({ date, value }));
 }
 
-function stepsForDate(steps: StepsEntry[], dateKey: string): number {
-  return steps.find((entry) => entry.date === dateKey)?.steps ?? 0;
+/** Window bounds for a tracking range, used to filter raw sessions (not just bucket them). */
+function trackingRangeBounds(range: TrackingRange): { start: string; end: string } {
+  const today = new Date();
+  if (range === 'week') {
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    return { start: toDateKey(weekStart), end: toDateKey(weekEnd) };
+  }
+  if (range === 'month') {
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    return { start: toDateKey(new Date(year, month, 1)), end: toDateKey(new Date(year, month + 1, 0)) };
+  }
+  const year = today.getFullYear();
+  return { start: `${year}-01-01`, end: `${year}-12-31` };
 }
 
-/** Buckets StepsEntry[] into day-of-week (week), day-of-month (month), or month (year) bars. */
-function buildStepsBars(steps: StepsEntry[], range: StepsRange): BarChartBar[] {
+function runSessionsInRange(cardioSessions: CardioSession[], range: TrackingRange): CardioSession[] {
+  const { start, end } = trackingRangeBounds(range);
+  return cardioSessions.filter((session) => session.activityType === 'run' && session.date >= start && session.date <= end);
+}
+
+function distanceForDate(sessions: CardioSession[], dateKey: string): number {
+  return sessions.filter((session) => session.date === dateKey).reduce((sum, session) => sum + (session.distanceMiles ?? 0), 0);
+}
+
+/** Buckets a run distance-per-day/month series — same shape the old Steps bars used. */
+function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, unitSystem: UnitSystem): BarChartBar[] {
+  const sessions = runSessionsInRange(cardioSessions, range);
   const today = new Date();
   const todayKeyValue = toDateKey(today);
 
@@ -347,7 +416,11 @@ function buildStepsBars(steps: StepsEntry[], range: StepsRange): BarChartBar[] {
       const date = new Date(weekStart);
       date.setDate(weekStart.getDate() + index);
       const dateKey = toDateKey(date);
-      return { label: WEEKDAY_LABELS[index], value: stepsForDate(steps, dateKey), highlighted: dateKey === todayKeyValue };
+      return {
+        label: WEEKDAY_LABELS[index],
+        value: toDisplayDistance(distanceForDate(sessions, dateKey), unitSystem),
+        highlighted: dateKey === todayKeyValue,
+      };
     });
   }
 
@@ -361,7 +434,7 @@ function buildStepsBars(steps: StepsEntry[], range: StepsRange): BarChartBar[] {
       const showLabel = day === 1 || day === 15 || day === daysInMonth;
       return {
         label: showLabel ? String(day) : '',
-        value: stepsForDate(steps, dateKey),
+        value: toDisplayDistance(distanceForDate(sessions, dateKey), unitSystem),
         highlighted: dateKey === todayKeyValue,
       };
     });
@@ -370,29 +443,53 @@ function buildStepsBars(steps: StepsEntry[], range: StepsRange): BarChartBar[] {
   const year = today.getFullYear();
   const currentMonth = today.getMonth();
   const monthTotals = new Array(12).fill(0);
-  for (const entry of steps) {
-    const [entryYear, entryMonth] = entry.date.split('-').map(Number);
-    if (entryYear === year) monthTotals[entryMonth - 1] += entry.steps;
+  for (const session of sessions) {
+    const [entryYear, entryMonth] = session.date.split('-').map(Number);
+    if (entryYear === year) monthTotals[entryMonth - 1] += session.distanceMiles ?? 0;
   }
-  return monthTotals.map((value, index) => ({ label: MONTH_LABELS[index], value, highlighted: index === currentMonth }));
+  return monthTotals.map((total, index) => ({
+    label: MONTH_LABELS[index],
+    value: toDisplayDistance(total, unitSystem),
+    highlighted: index === currentMonth,
+  }));
 }
 
-function StatHeader({ label, latest, caption }: { label: string; latest: string; caption?: string }) {
-  // deltaCaption prefixes gains with '+' — those read as wins, so they go lime.
-  const isGain = caption?.startsWith('+');
-  return (
-    <View style={styles.statHeader}>
-      <View>
-        <ThemedText type="small">{label}</ThemedText>
-        <ThemedText type="stat">{latest}</ThemedText>
-      </View>
-      {caption ? (
-        <ThemedText type="statInline" themeColor={isGain ? 'primary' : 'textSecondary'}>
-          {caption}
-        </ThemedText>
-      ) : null}
-    </View>
-  );
+interface RunRangeMetrics {
+  totalDistanceMiles: number;
+  bestPaceSecPerMile: number | null;
+  longestRunMiles: number | null;
+}
+
+function runMetricsForRange(cardioSessions: CardioSession[], range: TrackingRange): RunRangeMetrics {
+  const sessions = runSessionsInRange(cardioSessions, range);
+  let total = 0;
+  let bestPace: number | null = null;
+  let longest: number | null = null;
+  for (const session of sessions) {
+    if (session.distanceMiles) {
+      total += session.distanceMiles;
+      longest = longest === null ? session.distanceMiles : Math.max(longest, session.distanceMiles);
+    }
+    if (session.avgPaceSecPerMile) {
+      bestPace = bestPace === null ? session.avgPaceSecPerMile : Math.min(bestPace, session.avgPaceSecPerMile);
+    }
+  }
+  return { totalDistanceMiles: total, bestPaceSecPerMile: bestPace, longestRunMiles: longest };
+}
+
+/** The cycling headline stat's current value, by index into RUN_METRIC_LABELS. */
+function runHeadlineValue(metrics: RunRangeMetrics, index: number, unitSystem: UnitSystem): string {
+  if (index === 0) {
+    return metrics.totalDistanceMiles > 0
+      ? `${toDisplayDistance(metrics.totalDistanceMiles, unitSystem)} ${distanceUnitLabel(unitSystem)}`
+      : '—';
+  }
+  if (index === 1) {
+    return metrics.bestPaceSecPerMile !== null ? formatPace(metrics.bestPaceSecPerMile, unitSystem) : '—';
+  }
+  return metrics.longestRunMiles !== null
+    ? `${toDisplayDistance(metrics.longestRunMiles, unitSystem)} ${distanceUnitLabel(unitSystem)}`
+    : '—';
 }
 
 const MENU_MAX_HEIGHT = 220;
@@ -529,6 +626,14 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: Spacing.two,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  runList: {
+    gap: Spacing.two,
+  },
   card: {
     borderRadius: Radius.lg,
     backgroundColor: colors.surface,
@@ -589,6 +694,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
+  },
+  runHeadline: {
+    gap: Spacing.half,
+  },
+  runHeadlineLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
   },
   dropdown: {
     position: 'relative',

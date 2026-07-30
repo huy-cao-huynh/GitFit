@@ -16,6 +16,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { Colors } from '@/constants/theme';
+// Side-effect import: registers the background location task. iOS can deliver
+// fixes after a cold start, so defineTask has to run before any screen mounts.
+import '@/lib/cardio-tracking';
 import { AuthProvider, useAuth } from '@/providers/auth-provider';
 import { StoreProvider, useStore } from '@/providers/store-provider';
 
@@ -56,6 +59,8 @@ function RootNavigator() {
         <Stack.Screen name="workout/[id]" />
         <Stack.Screen name="cardio/[id]" />
         <Stack.Screen name="history/[id]" />
+        <Stack.Screen name="history/cardio/index" />
+        <Stack.Screen name="history/cardio/[id]" />
         <Stack.Screen name="routine/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="cardio-routine/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="food/search" options={{ presentation: 'modal' }} />

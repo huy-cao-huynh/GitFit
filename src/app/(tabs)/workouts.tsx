@@ -17,7 +17,6 @@ import { ACTIVITY_ICONS } from '@/lib/activity-icons';
 import { muscleCoverageThisWeek, routineScheduleLabel } from '@/lib/store/derive';
 import type { Routine, WorkoutCategory } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
-import { formatDistance } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -25,7 +24,7 @@ const colors = Colors;
 const CATEGORY_LABELS: Record<WorkoutCategory, string> = { strength: 'Strength', cardio: 'Cardio' };
 
 export default function WorkoutsScreen() {
-  const { routines, sessions, preferences } = useStore();
+  const { routines, sessions } = useStore();
   const [category, setCategory] = useState<WorkoutCategory>('strength');
   const [segmentedWidth, setSegmentedWidth] = useState(0);
   const filtered = routines.filter((routine) => routine.category === category);
@@ -89,7 +88,7 @@ export default function WorkoutsScreen() {
               </ThemedText>
             </Pressable>
           }
-          renderItem={({ item }) => <RoutineRow routine={item} unitSystem={preferences.unitSystem} />}
+          renderItem={({ item }) => <RoutineRow routine={item} />}
           ListEmptyComponent={
             <ThemedText type="small" themeColor="textSecondary">
               Create a {CATEGORY_LABELS[category].toLowerCase()} workout to get started.
@@ -102,13 +101,9 @@ export default function WorkoutsScreen() {
   );
 }
 
-function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'imperial' | 'metric' }) {
+function RoutineRow({ routine }: { routine: Routine }) {
   const isCardio = routine.category === 'cardio';
-  const subtitle = isCardio
-    ? `${activityLabel(routine)} · ${routine.durationMinutes} min${
-        routine.targetDistanceMiles ? ` · ${formatDistance(routine.targetDistanceMiles, unitSystem)}` : ''
-      }`
-    : `${routine.exercises.length} exercises · ${routine.durationMinutes} min`;
+  const subtitle = isCardio ? activityLabel(routine) : `${routine.exercises.length} exercises · ${routine.durationMinutes} min`;
   const schedule = routineScheduleLabel(routine);
 
   const goToEdit = () =>

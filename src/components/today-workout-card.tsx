@@ -12,8 +12,7 @@ import { ACTIVITY_ICONS } from '@/lib/activity-icons';
 import { haptics } from '@/lib/haptics';
 import { muscleGroupsFor } from '@/lib/muscles';
 import { estimateRoutineCalories, type ScheduledRoutineTask } from '@/lib/store/derive';
-import type { Routine, RoutineExercise, UnitSystem } from '@/lib/store/types';
-import { formatDistance } from '@/lib/units';
+import type { Routine, RoutineExercise } from '@/lib/store/types';
 import { formatDuration } from '@/lib/format';
 
 const colors = Colors;
@@ -25,25 +24,19 @@ const MAX_MUSCLE_CHIPS = 4;
  * button starts *this* routine; starting something unscheduled is the
  * dashboard's separate New Workout button. Falls back to a rest-day state.
  */
-export function TodayWorkoutCard({
-  tasks,
-  unitSystem,
-}: {
-  tasks: ScheduledRoutineTask[];
-  unitSystem: UnitSystem;
-}) {
+export function TodayWorkoutCard({ tasks }: { tasks: ScheduledRoutineTask[] }) {
   if (tasks.length === 0) return <RestDayCard />;
 
   return (
     <View style={styles.stack}>
       {tasks.map((task) => (
-        <WorkoutCard key={task.routine.id} task={task} unitSystem={unitSystem} />
+        <WorkoutCard key={task.routine.id} task={task} />
       ))}
     </View>
   );
 }
 
-function WorkoutCard({ task, unitSystem }: { task: ScheduledRoutineTask; unitSystem: UnitSystem }) {
+function WorkoutCard({ task }: { task: ScheduledRoutineTask }) {
   const { routine, completed } = task;
   const isCardio = routine.category === 'cardio';
   const [expanded, setExpanded] = useState(false);
@@ -84,20 +77,22 @@ function WorkoutCard({ task, unitSystem }: { task: ScheduledRoutineTask; unitSys
               {routine.name}
             </ThemedText>
           </View>
-          <View style={styles.metaRow}>
-            <View style={styles.metaItem}>
-              <SymbolView name="clock" size={12} tintColor={colors.primary} />
-              <ThemedText type="small" themeColor="textSecondary">
-                <ThemedText type="statInline">{routine.durationMinutes}</ThemedText> min
-              </ThemedText>
+          {!isCardio ? (
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <SymbolView name="clock" size={12} tintColor={colors.primary} />
+                <ThemedText type="small" themeColor="textSecondary">
+                  <ThemedText type="statInline">{routine.durationMinutes}</ThemedText> min
+                </ThemedText>
+              </View>
+              <View style={styles.metaItem}>
+                <SymbolView name="flame.fill" size={12} tintColor={colors.primary} />
+                <ThemedText type="small" themeColor="textSecondary">
+                  ~<ThemedText type="statInline">{estimateRoutineCalories(routine)}</ThemedText> cal
+                </ThemedText>
+              </View>
             </View>
-            <View style={styles.metaItem}>
-              <SymbolView name="flame.fill" size={12} tintColor={colors.primary} />
-              <ThemedText type="small" themeColor="textSecondary">
-                ~<ThemedText type="statInline">{estimateRoutineCalories(routine)}</ThemedText> cal
-              </ThemedText>
-            </View>
-          </View>
+          ) : null}
           {completed ? (
             <View style={styles.metaRow}>
               <SymbolView name="checkmark.circle.fill" size={13} tintColor={colors.primary} />
@@ -134,7 +129,6 @@ function WorkoutCard({ task, unitSystem }: { task: ScheduledRoutineTask; unitSys
       {isCardio ? (
         <ThemedText type="small" themeColor="textSecondary">
           {activityLabel(routine)}
-          {routine.targetDistanceMiles ? ` · target ${formatDistance(routine.targetDistanceMiles, unitSystem)}` : ''}
         </ThemedText>
       ) : (
         <>

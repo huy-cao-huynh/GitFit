@@ -14,6 +14,17 @@ export const ACTIVITY_ICONS: Record<CardioActivityType, SFSymbol> = {
   hike: 'figure.hiking',
   swim: 'figure.pool.swim',
   cycle: 'figure.outdoor.cycle',
-  sport: 'sportscourt.fill',
   other: 'figure.mixed.cardio',
+};
+
+export const ACTIVITY_TYPES: CardioActivityType[] = ['walk', 'run', 'hike', 'swim', 'cycle', 'other'];
+
+/** Display label per cardio activity type, shared by the routine editor, the ad-hoc activity picker, and any screen synthesizing a name for an unrouted session. */
+export const ACTIVITY_LABELS: Record<CardioActivityType, string> = {
+  walk: 'Walk',
+  run: 'Run',
+  hike: 'Hike',
+  swim: 'Swim',
+  cycle: 'Cycle',
+  other: 'Other',
 };

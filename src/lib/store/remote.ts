@@ -20,6 +20,7 @@ import type {
   GoalEntry,
   GoalMetric,
   Goals,
+  GpsPoint,
   MealType,
   MeasurementDef,
   MeasurementEntry,
@@ -75,7 +76,6 @@ interface RoutineRow {
   tile_color: string;
   scheduled_days: number[] | null;
   activity_type: CardioActivityType | null;
-  target_distance_miles: number | null;
   routine_exercises: RoutineExerciseRow[];
 }
 
@@ -119,6 +119,9 @@ interface CardioSessionRow {
   minutes: number;
   distance_miles: number | null;
   calories: number | null;
+  route: GpsPoint[] | null;
+  elevation_gain_ft: number | null;
+  avg_pace_sec_per_mile: number | null;
 }
 
 interface GoalRow {
@@ -255,8 +258,7 @@ function mapRoutine(row: RoutineRow): Routine {
     tileColor: row.tile_color,
     scheduledDays: row.scheduled_days ? (row.scheduled_days as Weekday[]) : undefined,
     exercises: byPosition(row.routine_exercises).map(mapRoutineExercise),
-    activityType: row.activity_type ?? undefined,
-    targetDistanceMiles: row.target_distance_miles ?? undefined,
+    activityType: row.activity_type ? normalizeActivityType(row.activity_type) : undefined,
   };
 }
 
@@ -287,16 +289,31 @@ function mapSession(row: SessionRow): Session {
   };
 }
 
+const KNOWN_ACTIVITY_TYPES: readonly CardioActivityType[] = ['walk', 'run', 'hike', 'swim', 'cycle', 'other'];
+
+/**
+ * Coerce retired activity types to 'other'. 'sport' was removed from the app
+ * but the 0001 CHECK constraint still permits it, so old rows can still come
+ * back holding it — and an unrecognised value would index straight past
+ * ACTIVITY_ICONS and the calorie table into undefined.
+ */
+function normalizeActivityType(value: CardioActivityType): CardioActivityType {
+  return KNOWN_ACTIVITY_TYPES.includes(value) ? value : 'other';
+}
+
 function mapCardioSession(row: CardioSessionRow): CardioSession {
   return {
     id: row.id,
     routineId: row.routine_id,
     name: row.name,
-    activityType: row.activity_type,
+    activityType: normalizeActivityType(row.activity_type),
     date: row.date,
     minutes: row.minutes,
     distanceMiles: row.distance_miles ?? undefined,
     calories: row.calories ?? undefined,
+    route: row.route ?? undefined,
+    elevationGainFt: row.elevation_gain_ft ?? undefined,
+    avgPaceSecPerMile: row.avg_pace_sec_per_mile ?? undefined,
   };
 }
 
@@ -526,7 +543,6 @@ function routineToRow(routine: Routine) {
     tile_color: routine.tileColor,
     scheduled_days: routine.scheduledDays ?? null,
     activity_type: routine.activityType ?? null,
-    target_distance_miles: routine.targetDistanceMiles ?? null,
   };
 }
 
@@ -648,6 +664,9 @@ export async function insertCardioSession(session: CardioSession): Promise<void>
     minutes: session.minutes,
     distance_miles: session.distanceMiles ?? null,
     calories: session.calories ?? null,
+    route: session.route ?? null,
+    elevation_gain_ft: session.elevationGainFt ?? null,
+    avg_pace_sec_per_mile: session.avgPaceSecPerMile ?? null,
   });
   throwIfError(error);
 }

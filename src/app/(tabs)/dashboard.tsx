@@ -154,7 +154,7 @@ export default function DashboardScreen() {
               <ThemedText type="label" style={styles.sectionLabel}>
                 Today&apos;s Workout
               </ThemedText>
-              <TodayWorkoutCard tasks={scheduledTasks} unitSystem={unitSystem} />
+              <TodayWorkoutCard tasks={scheduledTasks} />
               {/* Deliberately separate from the card's play button: this one
                   starts something unscheduled, which is the only way in when
                   today is a rest day. */}

@@ -1,4 +1,6 @@
 import { router } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
+import { useState } from 'react';
 import { Pressable, SectionList, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Rect } from 'react-native-svg';
@@ -7,9 +9,9 @@ import { Chevron } from '@/components/chevron';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { ACTIVITY_ICONS, ACTIVITY_LABELS, ACTIVITY_TYPES } from '@/lib/activity-icons';
 import { scheduledRoutineTasks, todayKey } from '@/lib/store/derive';
-import type { Routine } from '@/lib/store/types';
-import { formatDistance } from '@/lib/units';
+import type { CardioActivityType, Routine } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -20,8 +22,13 @@ interface Section {
 }
 
 export default function ChooseWorkoutScreen() {
-  const { routines, sessions, cardioSessions, preferences } = useStore();
-  const unitSystem = preferences.unitSystem;
+  const { routines, sessions, cardioSessions } = useStore();
+  const [showActivityPicker, setShowActivityPicker] = useState(false);
+
+  const startAdHocCardio = (activityType: CardioActivityType) => {
+    router.back();
+    router.push({ pathname: '/cardio/[id]', params: { id: 'adhoc', activityType } });
+  };
 
   const plannedRoutines = scheduledRoutineTasks(routines, sessions, cardioSessions, todayKey())
     .filter((task) => !task.completed)
@@ -56,23 +63,36 @@ export default function ChooseWorkoutScreen() {
           contentContainerStyle={styles.list}
           stickySectionHeadersEnabled={false}
           ListHeaderComponent={
-            <View style={styles.createRow}>
-              <Pressable style={styles.createOption} onPress={() => router.push('/routine/new')}>
-                <View style={styles.createIcon}>
-                  <ThemedText style={styles.createIconText}>+</ThemedText>
+            <View style={styles.createSection}>
+              <View style={styles.createRow}>
+                <Pressable style={styles.createOption} onPress={() => router.push('/routine/new')}>
+                  <View style={styles.createIcon}>
+                    <ThemedText style={styles.createIconText}>+</ThemedText>
+                  </View>
+                  <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
+                    New Strength
+                  </ThemedText>
+                </Pressable>
+                <Pressable style={styles.createOption} onPress={() => setShowActivityPicker((v) => !v)}>
+                  <View style={styles.createIcon}>
+                    <ThemedText style={styles.createIconText}>+</ThemedText>
+                  </View>
+                  <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
+                    New Cardio
+                  </ThemedText>
+                </Pressable>
+              </View>
+              {/* Cardio has nothing to configure — pick an activity and start moving. */}
+              {showActivityPicker && (
+                <View style={styles.activityGrid}>
+                  {ACTIVITY_TYPES.map((option) => (
+                    <Pressable key={option} style={styles.activityChip} onPress={() => startAdHocCardio(option)}>
+                      <SymbolView name={ACTIVITY_ICONS[option]} size={14} tintColor={colors.primaryLight} />
+                      <ThemedText type="small">{ACTIVITY_LABELS[option]}</ThemedText>
+                    </Pressable>
+                  ))}
                 </View>
-                <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-                  New Strength
-                </ThemedText>
-              </Pressable>
-              <Pressable style={styles.createOption} onPress={() => router.push('/cardio-routine/new')}>
-                <View style={styles.createIcon}>
-                  <ThemedText style={styles.createIconText}>+</ThemedText>
-                </View>
-                <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-                  New Cardio
-                </ThemedText>
-              </Pressable>
+              )}
             </View>
           }
           renderSectionHeader={({ section }) => (
@@ -80,7 +100,7 @@ export default function ChooseWorkoutScreen() {
               {section.title.toUpperCase()}
             </ThemedText>
           )}
-          renderItem={({ item }) => <RoutineRow routine={item} unitSystem={unitSystem} />}
+          renderItem={({ item }) => <RoutineRow routine={item} />}
           ListEmptyComponent={
             <ThemedText type="small" themeColor="textSecondary">
               No workouts yet — create one to get started.
@@ -92,13 +112,9 @@ export default function ChooseWorkoutScreen() {
   );
 }
 
-function RoutineRow({ routine, unitSystem }: { routine: Routine; unitSystem: 'imperial' | 'metric' }) {
+function RoutineRow({ routine }: { routine: Routine }) {
   const isCardio = routine.category === 'cardio';
-  const subtitle = isCardio
-    ? `${activityLabel(routine)} · ${routine.durationMinutes} min${
-        routine.targetDistanceMiles ? ` · ${formatDistance(routine.targetDistanceMiles, unitSystem)}` : ''
-      }`
-    : `${routine.exercises.length} exercises · ${routine.durationMinutes} min`;
+  const subtitle = isCardio ? activityLabel(routine) : `${routine.exercises.length} exercises · ${routine.durationMinutes} min`;
 
   const goToPlay = () => {
     // Pop the "Choose a Workout" modal first so the session screen pushes
@@ -169,10 +185,27 @@ const styles = StyleSheet.create({
     marginTop: Spacing.three,
     marginBottom: Spacing.one,
   },
+  createSection: {
+    marginBottom: Spacing.three,
+  },
   createRow: {
     flexDirection: 'row',
     gap: Spacing.two,
-    marginBottom: Spacing.three,
+  },
+  activityGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  activityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.full,
+    backgroundColor: colors.surfaceElevated,
   },
   createOption: {
     flex: 1,

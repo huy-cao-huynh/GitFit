@@ -13,7 +13,10 @@
         "dark": "./assets/images/ios-icon-dark.png",
         "tinted": "./assets/images/ios-icon-tinted.png"
       },
-      "bundleIdentifier": "com.anonymous.MyGymApp"
+      "bundleIdentifier": "com.anonymous.MyGymApp",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -42,7 +45,14 @@
       "@react-native-community/datetimepicker",
       "expo-image",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "GitFit uses your location while tracking a cardio workout to record your route and distance.",
+          "locationAlwaysAndWhenInUsePermission": "GitFit keeps recording your route while a cardio workout is running, so the track stays complete with your phone locked or in a pocket."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

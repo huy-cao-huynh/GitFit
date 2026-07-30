@@ -4,12 +4,14 @@
  * boundary based on the user's Preferences.unitSystem.
  */
 
-import type { UnitSystem } from '@/lib/store/types';
+import type { CardioActivityType, UnitSystem } from '@/lib/store/types';
 
 const LB_PER_KG = 2.20462;
 const MI_PER_KM = 0.621371;
 const OZ_PER_ML = 0.033814;
 const IN_PER_CM = 0.393701;
+const FT_PER_M = 3.28084;
+const YD_PER_MILE = 1760;
 
 export function weightUnitLabel(system: UnitSystem): string {
   return system === 'metric' ? 'kg' : 'lbs';
@@ -25,6 +27,11 @@ export function volumeUnitLabel(system: UnitSystem): string {
 
 export function lengthUnitLabel(system: UnitSystem): string {
   return system === 'metric' ? 'cm' : 'in';
+}
+
+/** Elevation reads in feet or metres — its own axis, not the cm/in body scale. */
+export function elevationUnitLabel(system: UnitSystem): string {
+  return system === 'metric' ? 'm' : 'ft';
 }
 
 /** Canonical lbs → display value in the active unit system. */
@@ -70,6 +77,58 @@ export function formatWeight(lbs: number, system: UnitSystem): string {
 
 export function formatDistance(miles: number, system: UnitSystem): string {
   return `${toDisplayDistance(miles, system)} ${distanceUnitLabel(system)}`;
+}
+
+/**
+ * Pools are measured in yards regardless of the user's mi/km preference, so
+ * swim distance ignores `UnitSystem` entirely.
+ */
+export function swimDistanceUnitLabel(): string {
+  return 'yd';
+}
+
+export function toDisplaySwimDistance(miles: number): number {
+  return Math.round(miles * YD_PER_MILE);
+}
+
+export function fromDisplaySwimDistance(yards: number): number {
+  return yards / YD_PER_MILE;
+}
+
+/** Distance display keyed on activity type — swim is fixed to yards, everything else follows `UnitSystem`. */
+export function distanceUnitLabelForActivity(activityType: CardioActivityType, system: UnitSystem): string {
+  return activityType === 'swim' ? swimDistanceUnitLabel() : distanceUnitLabel(system);
+}
+
+export function toDisplayDistanceForActivity(miles: number, activityType: CardioActivityType, system: UnitSystem): number {
+  return activityType === 'swim' ? toDisplaySwimDistance(miles) : toDisplayDistance(miles, system);
+}
+
+export function fromDisplayDistanceForActivity(value: number, activityType: CardioActivityType, system: UnitSystem): number {
+  return activityType === 'swim' ? fromDisplaySwimDistance(value) : fromDisplayDistance(value, system);
+}
+
+/** Canonical seconds-per-mile pace → seconds-per-display-unit (mile or km). */
+export function toDisplayPaceSecPerUnit(secPerMile: number, system: UnitSystem): number {
+  return system === 'metric' ? secPerMile * MI_PER_KM : secPerMile;
+}
+
+export function formatPace(secPerMile: number, system: UnitSystem): string {
+  const secPerUnit = toDisplayPaceSecPerUnit(secPerMile, system);
+  const minutes = Math.floor(secPerUnit / 60);
+  const seconds = Math.round(secPerUnit % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${minutes}:${seconds} /${distanceUnitLabel(system)}`;
+}
+
+/** Canonical feet → display value in the active unit system, rounded whole. */
+export function toDisplayElevation(feet: number, system: UnitSystem): number {
+  return Math.round(system === 'metric' ? feet / FT_PER_M : feet);
+}
+
+export function formatElevation(feet: number, system: UnitSystem): string {
+  return `${toDisplayElevation(feet, system)} ${elevationUnitLabel(system)}`;
 }
 
 export function formatVolume(ounces: number, system: UnitSystem): string {

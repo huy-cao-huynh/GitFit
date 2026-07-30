@@ -268,50 +268,64 @@ export default function LoggingScreen() {
                                 {statusLabel}
                               </ThemedText>
                             </View>
-                            <View style={styles.metaItem}>
-                              <SymbolView name="timer" size={11} tintColor={colors.textSecondary} />
-                              <ThemedText type="small" themeColor="textSecondary">
-                                {task.routine.durationMinutes} min
-                              </ThemedText>
-                            </View>
-                            <View style={styles.metaItem}>
-                              <SymbolView name="flame.fill" size={11} tintColor={colors.textSecondary} />
-                              <ThemedText type="small" themeColor="textSecondary">
-                                ~{estimateRoutineCalories(task.routine)} cal
-                              </ThemedText>
-                            </View>
+                            {task.routine.category !== 'cardio' && (
+                              <>
+                                <View style={styles.metaItem}>
+                                  <SymbolView name="timer" size={11} tintColor={colors.textSecondary} />
+                                  <ThemedText type="small" themeColor="textSecondary">
+                                    {task.routine.durationMinutes} min
+                                  </ThemedText>
+                                </View>
+                                <View style={styles.metaItem}>
+                                  <SymbolView name="flame.fill" size={11} tintColor={colors.textSecondary} />
+                                  <ThemedText type="small" themeColor="textSecondary">
+                                    ~{estimateRoutineCalories(task.routine)} cal
+                                  </ThemedText>
+                                </View>
+                              </>
+                            )}
                           </View>
                         </View>
                         {!task.completed && <SymbolView name="chevron.right" size={12} tintColor={colors.textSecondary} />}
                       </Pressable>
                     );
                   })}
-                  {extraCompletedWorkouts.map((workout) => (
-                    <View key={workout.id} style={styles.scheduledRow}>
-                      <View style={styles.flex}>
-                        <ThemedText type="smallBold">{workout.name}</ThemedText>
-                        <View style={styles.workoutMetaRow}>
-                          <View style={[styles.statusPill, styles.statusPillCompleted]}>
-                            <ThemedText type="caption" style={{ color: colors.primaryLight }}>
-                              Completed
-                            </ThemedText>
-                          </View>
-                          <View style={styles.metaItem}>
-                            <SymbolView name="timer" size={11} tintColor={colors.textSecondary} />
-                            <ThemedText type="small" themeColor="textSecondary">
-                              {workout.minutes} min
-                            </ThemedText>
-                          </View>
-                          <View style={styles.metaItem}>
-                            <SymbolView name="flame.fill" size={11} tintColor={colors.textSecondary} />
-                            <ThemedText type="small" themeColor="textSecondary">
-                              {workout.calories} cal
-                            </ThemedText>
+                  {extraCompletedWorkouts.map((workout) => {
+                    const historyPath =
+                      workout.category === 'cardio'
+                        ? { pathname: '/history/cardio/[id]' as const, params: { id: workout.id } }
+                        : { pathname: '/history/[id]' as const, params: { id: workout.id } };
+                    return (
+                      <Pressable
+                        key={workout.id}
+                        style={styles.scheduledRow}
+                        onPress={() => router.push(historyPath)}>
+                        <View style={styles.flex}>
+                          <ThemedText type="smallBold">{workout.name}</ThemedText>
+                          <View style={styles.workoutMetaRow}>
+                            <View style={[styles.statusPill, styles.statusPillCompleted]}>
+                              <ThemedText type="caption" style={{ color: colors.primaryLight }}>
+                                Completed
+                              </ThemedText>
+                            </View>
+                            <View style={styles.metaItem}>
+                              <SymbolView name="timer" size={11} tintColor={colors.textSecondary} />
+                              <ThemedText type="small" themeColor="textSecondary">
+                                {workout.minutes} min
+                              </ThemedText>
+                            </View>
+                            <View style={styles.metaItem}>
+                              <SymbolView name="flame.fill" size={11} tintColor={colors.textSecondary} />
+                              <ThemedText type="small" themeColor="textSecondary">
+                                {workout.calories} cal
+                              </ThemedText>
+                            </View>
                           </View>
                         </View>
-                      </View>
-                    </View>
-                  ))}
+                        <SymbolView name="chevron.right" size={12} tintColor={colors.textSecondary} />
+                      </Pressable>
+                    );
+                  })}
                   {showWeighInTask &&
                     (() => {
                       const weighInCompleted = !!weightForSelectedDate;

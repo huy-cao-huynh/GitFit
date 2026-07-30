@@ -26,7 +26,12 @@ export interface RoutineExercise {
 
 export type WorkoutCategory = 'strength' | 'cardio';
 
-export type CardioActivityType = 'walk' | 'run' | 'hike' | 'swim' | 'cycle' | 'sport' | 'other';
+/**
+ * 'sport' was removed — it covered too many unlike activities to model. Rows
+ * still holding it are coerced to 'other' on read (see remote.ts); the 0001
+ * CHECK constraint still permits it, which is harmless since nothing writes it.
+ */
+export type CardioActivityType = 'walk' | 'run' | 'hike' | 'swim' | 'cycle' | 'other';
 
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -44,8 +49,6 @@ export interface Routine {
   exercises: RoutineExercise[];
   /** Cardio only. */
   activityType?: CardioActivityType;
-  /** Cardio only, canonical miles. */
-  targetDistanceMiles?: number;
 }
 
 export interface SetLog {
@@ -74,7 +77,23 @@ export interface Session {
   exercises: SessionExercise[];
 }
 
+/** One GPS fix recorded during a live-tracked cardio session. */
+export interface GpsPoint {
+  lat: number;
+  lng: number;
+  altitude?: number;
+  t: number; // ms epoch
+  /**
+   * Elapsed *moving* ms at this fix — wall-clock time since the session
+   * started, minus everything spent paused. Splits and pace read this rather
+   * than `t` so a pause doesn't inflate whichever split it lands in. Absent on
+   * routes recorded before pause existed; callers fall back to `t` deltas.
+   */
+  e?: number;
+}
+
 /** A completed cardio workout. */
+
 export interface CardioSession {
   id: string;
   routineId: string | null;
@@ -84,6 +103,11 @@ export interface CardioSession {
   minutes: number;
   distanceMiles?: number;
   calories?: number;
+  /** Recorded route, present only for GPS-tracked sessions. */
+  route?: GpsPoint[];
+  /** Approximate — smoothed from GPS altitude samples, not barometer data. */
+  elevationGainFt?: number;
+  avgPaceSecPerMile?: number;
 }
 
 /**

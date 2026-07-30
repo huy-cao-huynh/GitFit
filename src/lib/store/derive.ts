@@ -29,7 +29,13 @@ import type {
 } from './types';
 import { formatDuration } from '@/lib/format';
 import { muscleGroupsFor } from '@/lib/muscles';
-import { formatWeight, toDisplayWeight, weightUnitLabel } from '@/lib/units';
+import {
+  formatWeight,
+  toDisplayDistance,
+  toDisplayElevation,
+  toDisplayWeight,
+  weightUnitLabel,
+} from '@/lib/units';
 
 /** Rough calories/minute per activity — same "placeholder until HealthKit" spirit as the strength session heuristic. */
 const CARDIO_CALORIES_PER_MINUTE: Record<CardioActivityType, number> = {
@@ -38,26 +44,110 @@ const CARDIO_CALORIES_PER_MINUTE: Record<CardioActivityType, number> = {
   hike: 7,
   swim: 8,
   cycle: 7,
-  sport: 8,
   other: 6,
 };
 
+/**
+ * Activities where a GPS trace means something. Swimming traces a pool wall or
+ * nothing at all, and 'other' is a catch-all that's as likely to be a rowing
+ * machine as a road — recording either would burn battery to produce a route
+ * nobody wants, and would skip the manual distance entry they do need.
+ */
+const GPS_TRACKED_ACTIVITIES: readonly CardioActivityType[] = ['walk', 'run', 'hike', 'cycle'];
+
+export function tracksLocation(activityType: CardioActivityType): boolean {
+  return GPS_TRACKED_ACTIVITIES.includes(activityType);
+}
+
 export function estimateCardioCalories(activityType: CardioActivityType, minutes: number): number {
   return Math.round(minutes * CARDIO_CALORIES_PER_MINUTE[activityType]);
+}
+
+/**
+ * Gross cost of covering ground, per kg of body mass per km. Roughly
+ * speed-independent for running; walking and hiking are cheaper per km but
+ * take longer, which is why distance-based beats minutes-based here.
+ */
+const KCAL_PER_KG_PER_KM: Partial<Record<CardioActivityType, number>> = {
+  run: 1.036,
+  walk: 0.53,
+  hike: 0.62,
+};
+
+/** Climbing work: m·g·h at ~22% muscular efficiency, converted joules → kcal. */
+const KCAL_PER_KG_PER_METER_CLIMBED = 0.0105;
+
+/** Compendium-of-physical-activities METs, bucketed by cycling speed in mph. */
+function cyclingMet(mph: number): number {
+  if (mph < 10) return 4;
+  if (mph < 12) return 6.8;
+  if (mph < 14) return 8;
+  if (mph < 16) return 10;
+  if (mph < 19) return 12;
+  return 15.8;
+}
+
+export interface CardioCalorieInput {
+  activityType: CardioActivityType;
+  minutes: number;
+  distanceMiles?: number;
+  elevationGainFt?: number;
+  /** Canonical lbs, from the most recent bodyweight entry. */
+  bodyweightLb?: number;
+}
+
+/**
+ * Burn for a *completed* GPS-tracked session, using how far you actually went
+ * and how much you climbed rather than minutes × a constant.
+ *
+ * Falls back to `estimateCardioCalories` whenever the inputs can't support
+ * better — no distance (treadmill, denied permission), no bodyweight on
+ * record, or an activity GPS says nothing useful about (swimming, court
+ * sports). A calorie figure derived from a guessed body mass would be fiction
+ * dressed up as precision.
+ */
+export function estimateCardioCaloriesDetailed({
+  activityType,
+  minutes,
+  distanceMiles,
+  elevationGainFt,
+  bodyweightLb,
+}: CardioCalorieInput): number {
+  if (!bodyweightLb || !distanceMiles || minutes <= 0) {
+    return estimateCardioCalories(activityType, minutes);
+  }
+
+  const kg = toDisplayWeight(bodyweightLb, 'metric');
+  const km = toDisplayDistance(distanceMiles, 'metric');
+  const climb = elevationGainFt
+    ? toDisplayElevation(elevationGainFt, 'metric') * kg * KCAL_PER_KG_PER_METER_CLIMBED
+    : 0;
+
+  const perKgPerKm = KCAL_PER_KG_PER_KM[activityType];
+  if (perKgPerKm) return Math.round(kg * km * perKgPerKm + climb);
+
+  if (activityType === 'cycle') {
+    const hours = minutes / 60;
+    return Math.round(cyclingMet(distanceMiles / hours) * kg * hours + climb);
+  }
+
+  return estimateCardioCalories(activityType, minutes);
+}
+
+/** Most recent logged bodyweight in canonical lbs. `bodyweight` arrives date-ascending. */
+export function latestBodyweightLb(bodyweight: BodyweightEntry[]): number | undefined {
+  return bodyweight.length ? bodyweight[bodyweight.length - 1].weight : undefined;
 }
 
 /** Same placeholder-until-HealthKit heuristic, for strength sessions. */
 export const STRENGTH_CALORIES_PER_MINUTE = 8;
 
 /**
- * Estimated burn for a routine before it's been run — what the dashboard
- * previews. Uses the same constants the session screens write on save, so the
- * preview and the logged number agree.
+ * Estimated burn for a strength routine before it's been run — what the
+ * dashboard previews. Cardio has no pre-set duration to estimate from, so
+ * callers only ever invoke this for strength routines.
  */
 export function estimateRoutineCalories(routine: Routine): number {
-  if (routine.category === 'cardio') {
-    return estimateCardioCalories(routine.activityType ?? 'other', routine.durationMinutes);
-  }
   return routine.durationMinutes * STRENGTH_CALORIES_PER_MINUTE;
 }
 
