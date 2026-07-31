@@ -71,12 +71,15 @@ export function CardioSummary({ session, unitSystem, animated = false }: CardioS
           />
         </View>
 
-        {session.avgPaceSecPerMile || session.elevationGainFt ? (
+        {session.avgPaceSecPerMile || session.elevationGainFt != null ? (
           <View style={[styles.statRow, styles.secondRow]}>
             {session.avgPaceSecPerMile ? (
               <SummaryStat value={formatPace(session.avgPaceSecPerMile, unitSystem)} unit="" label="Avg pace" />
             ) : null}
-            {session.elevationGainFt ? (
+            {/* Explicit != null, not truthiness — a real flat-route 0ft climb is
+                proof elevation was tracked and should say so, not disappear
+                indistinguishably from "we never got enough altitude data." */}
+            {session.elevationGainFt != null ? (
               <SummaryStat
                 value={`${toDisplayElevation(session.elevationGainFt, unitSystem)}`}
                 unit={elevationUnitLabel(unitSystem)}

@@ -1,6 +1,7 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
@@ -9,6 +10,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS, ACTIVITY_LABELS, ACTIVITY_TYPES } from '@/lib/activity-icons';
+import { haptics } from '@/lib/haptics';
 import { makeId } from '@/lib/store/id';
 import type { CardioActivityType, Routine, Weekday } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
@@ -18,17 +20,41 @@ const colors = Colors;
 export default function CardioRoutineEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { routines, addRoutine, updateRoutine, deleteRoutine } = useStore();
+  const navigation = useNavigation();
 
   const isNew = id === 'new';
   const existing = isNew ? undefined : routines.find((routine) => routine.id === id && routine.category === 'cardio');
 
-  const [name, setName] = useState(existing?.name ?? '');
-  const [activityType, setActivityType] = useState<CardioActivityType>(existing?.activityType ?? 'run');
-  const [scheduledDays, setScheduledDays] = useState<Weekday[]>(existing?.scheduledDays ?? []);
+  const [name, setNameState] = useState(existing?.name ?? '');
+  const [activityType, setActivityTypeState] = useState<CardioActivityType>(existing?.activityType ?? 'run');
+  const [scheduledDays, setScheduledDaysState] = useState<Weekday[]>(existing?.scheduledDays ?? []);
+
+  // Same dirty-guard shape as routine/[id].tsx — see the comment there for
+  // why the swipe gesture is disabled rather than intercepted after the fact.
+  const dirtyRef = useRef(false);
+  const bypassPromptRef = useRef(false);
+  const markDirty = () => {
+    if (dirtyRef.current) return;
+    dirtyRef.current = true;
+    navigation.setOptions({ gestureEnabled: false });
+  };
+
+  const setName = (value: string) => {
+    setNameState(value);
+    markDirty();
+  };
+  const setActivityType = (value: CardioActivityType) => {
+    setActivityTypeState(value);
+    markDirty();
+  };
+  const setScheduledDays = (value: Weekday[]) => {
+    setScheduledDaysState(value);
+    markDirty();
+  };
 
   const canSave = name.trim().length > 0;
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     if (!canSave) return;
     const routine: Routine = {
       id: existing?.id ?? makeId(),
@@ -42,19 +68,46 @@ export default function CardioRoutineEditorScreen() {
       exercises: [],
       activityType,
     };
+    bypassPromptRef.current = true;
+    haptics.notification(Haptics.NotificationFeedbackType.Success);
     if (existing) {
       updateRoutine(routine);
     } else {
       addRoutine(routine);
     }
     router.back();
-  };
+  }, [canSave, existing, name, scheduledDays, activityType, addRoutine, updateRoutine]);
 
   const handleDelete = () => {
     if (!existing) return;
+    bypassPromptRef.current = true;
+    haptics.notification(Haptics.NotificationFeedbackType.Warning);
     deleteRoutine(existing.id);
     router.back();
   };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (!dirtyRef.current || bypassPromptRef.current) return;
+      e.preventDefault();
+      const discard = () => {
+        bypassPromptRef.current = true;
+        navigation.dispatch(e.data.action);
+      };
+      const buttons = canSave
+        ? [
+            { text: 'Keep Editing', style: 'cancel' as const },
+            { text: 'Save', onPress: handleSave },
+            { text: 'Discard', style: 'destructive' as const, onPress: discard },
+          ]
+        : [
+            { text: 'Keep Editing', style: 'cancel' as const },
+            { text: 'Discard', style: 'destructive' as const, onPress: discard },
+          ];
+      Alert.alert('Discard changes?', 'You have unsaved changes to this workout.', buttons);
+    });
+    return unsubscribe;
+  }, [navigation, canSave, handleSave]);
 
   return (
     <ThemedView style={styles.container}>

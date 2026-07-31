@@ -46,7 +46,8 @@ export default function DashboardScreen() {
     preferences,
   } = useStore();
   const metadata = session?.user.user_metadata ?? {};
-  const name = (metadata.full_name as string | undefined)?.trim() || session?.user.email?.split('@')[0] || 'there';
+  const fullName = (metadata.full_name as string | undefined)?.trim() || session?.user.email?.split('@')[0] || 'there';
+  const name = fullName.split(/\s+/)[0];
   const scrollRef = useResetScrollOnFocus<ScrollView>();
 
   const unitSystem = preferences.unitSystem;

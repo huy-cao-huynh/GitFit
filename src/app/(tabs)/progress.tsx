@@ -28,7 +28,14 @@ import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing, 
 import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
 import type { CardioSession, ProgressPoint, Session, UnitSystem } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
-import { distanceUnitLabel, formatPace, toDisplayDistance, toDisplayWeight, weightUnitLabel } from '@/lib/units';
+import {
+  distanceUnitLabel,
+  formatPace,
+  toDisplayDistance,
+  toDisplayPaceSecPerUnit,
+  toDisplayWeight,
+  weightUnitLabel,
+} from '@/lib/units';
 import { funWeightUnit } from '@/lib/weight-fun-units';
 import { useStore } from '@/providers/store-provider';
 
@@ -48,8 +55,6 @@ const TRACKING_RANGE_OPTIONS = (['week', 'month', 'year'] as TrackingRange[]).ma
   label: TRACKING_RANGE_LABELS[id],
 }));
 
-const RUN_METRIC_LABELS = ['Total distance', 'Best pace', 'Longest run'];
-
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -57,7 +62,6 @@ export default function ProgressScreen() {
   const { sessions, cardioSessions, bodyweight, preferences } = useStore();
   const unitSystem = preferences.unitSystem;
   const [runRange, setRunRange] = useState<TrackingRange>('week');
-  const [runMetricIndex, setRunMetricIndex] = useState(0);
   const [clusterRange, setClusterRange] = useState<MetricRange>('month');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
@@ -88,6 +92,7 @@ export default function ProgressScreen() {
   );
   const allRunSessions = useMemo(() => cardioSessions.filter((s) => s.activityType === 'run'), [cardioSessions]);
   const runBars = buildRunBars(cardioSessions, runRange, unitSystem);
+  const pacePoints = buildPacePoints(cardioSessions, runRange, unitSystem);
   const runMetrics = runMetricsForRange(cardioSessions, runRange);
   const bodyweightPoints: ProgressPoint[] = filterPoints(
     bodyweight.map((entry) => ({ date: entry.date, value: toDisplayWeight(entry.weight, unitSystem) })),
@@ -155,23 +160,43 @@ export default function ProgressScreen() {
             TRACKING
           </ThemedText>
 
+          <RangeToggle options={TRACKING_RANGE_OPTIONS} value={runRange} onChange={setRunRange} />
+
           <ThemedView type="surface" style={styles.card}>
             <View style={styles.statHeader}>
-              <Pressable
-                onPress={() => setRunMetricIndex((index) => (index + 1) % RUN_METRIC_LABELS.length)}
-                hitSlop={8}
-                style={styles.runHeadline}>
-                <View style={styles.runHeadlineLabelRow}>
-                  <ThemedText type="small">{RUN_METRIC_LABELS[runMetricIndex]}</ThemedText>
-                  <SymbolView name="arrow.triangle.2.circlepath" size={11} tintColor={colors.textSecondary} />
-                </View>
-                <ThemedText type="stat">{runHeadlineValue(runMetrics, runMetricIndex, unitSystem)}</ThemedText>
-              </Pressable>
+              <View style={styles.runHeadline}>
+                <ThemedText type="small">Pace</ThemedText>
+                <ThemedText type="stat">
+                  {runMetrics.bestPaceSecPerMile !== null ? formatPace(runMetrics.bestPaceSecPerMile, unitSystem) : '—'}
+                </ThemedText>
+              </View>
               <ThemedText type="statInline" themeColor="textSecondary">
                 {TRACKING_RANGE_LABELS[runRange].toLowerCase()}
               </ThemedText>
             </View>
-            <RangeToggle options={TRACKING_RANGE_OPTIONS} value={runRange} onChange={setRunRange} />
+            {chartWidth > 0 && pacePoints.length > 1 ? (
+              <LineChart points={pacePoints} width={chartWidth} color={ChartColors.cardio} yFormatter={formatPaceMinutesTick} />
+            ) : (
+              <ThemedText type="small" themeColor="textSecondary">
+                Log a couple of runs to see your pace trend.
+              </ThemedText>
+            )}
+          </ThemedView>
+
+          <ThemedView type="surface" style={styles.card}>
+            <View style={styles.statHeader}>
+              <View style={styles.runHeadline}>
+                <ThemedText type="small">Distance</ThemedText>
+                <ThemedText type="stat">
+                  {runMetrics.totalDistanceMiles > 0
+                    ? `${toDisplayDistance(runMetrics.totalDistanceMiles, unitSystem)} ${distanceUnitLabel(unitSystem)}`
+                    : '—'}
+                </ThemedText>
+              </View>
+              <ThemedText type="statInline" themeColor="textSecondary">
+                {TRACKING_RANGE_LABELS[runRange].toLowerCase()}
+              </ThemedText>
+            </View>
             {chartWidth > 0 && <BarChart bars={runBars} width={chartWidth} color={ChartColors.cardio} />}
             {allRunSessions.length === 0 && (
               <ThemedText type="small" themeColor="textSecondary">
@@ -403,6 +428,14 @@ function distanceForDate(sessions: CardioSession[], dateKey: string): number {
   return sessions.filter((session) => session.date === dateKey).reduce((sum, session) => sum + (session.distanceMiles ?? 0), 0);
 }
 
+/** Y-axis label for the pace line chart, which plots minutes-per-unit (float) rather than raw seconds. */
+function formatPaceMinutesTick(value: number): string {
+  const totalSeconds = Math.round(value * 60);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
 /** Buckets a run distance-per-day/month series — same shape the old Steps bars used. */
 function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, unitSystem: UnitSystem): BarChartBar[] {
   const sessions = runSessionsInRange(cardioSessions, range);
@@ -454,42 +487,33 @@ function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, uni
   }));
 }
 
+/** One point per run in range, chronological — pace doesn't aggregate across a day the way distance sums do, so unlike the distance bars this is per-session, not bucketed. */
+function buildPacePoints(cardioSessions: CardioSession[], range: TrackingRange, unitSystem: UnitSystem): ProgressPoint[] {
+  return runSessionsInRange(cardioSessions, range)
+    .filter((session): session is CardioSession & { avgPaceSecPerMile: number } => !!session.avgPaceSecPerMile)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((session) => ({
+      date: session.date,
+      value: toDisplayPaceSecPerUnit(session.avgPaceSecPerMile, unitSystem) / 60,
+    }));
+}
+
 interface RunRangeMetrics {
   totalDistanceMiles: number;
   bestPaceSecPerMile: number | null;
-  longestRunMiles: number | null;
 }
 
 function runMetricsForRange(cardioSessions: CardioSession[], range: TrackingRange): RunRangeMetrics {
   const sessions = runSessionsInRange(cardioSessions, range);
   let total = 0;
   let bestPace: number | null = null;
-  let longest: number | null = null;
   for (const session of sessions) {
-    if (session.distanceMiles) {
-      total += session.distanceMiles;
-      longest = longest === null ? session.distanceMiles : Math.max(longest, session.distanceMiles);
-    }
+    if (session.distanceMiles) total += session.distanceMiles;
     if (session.avgPaceSecPerMile) {
       bestPace = bestPace === null ? session.avgPaceSecPerMile : Math.min(bestPace, session.avgPaceSecPerMile);
     }
   }
-  return { totalDistanceMiles: total, bestPaceSecPerMile: bestPace, longestRunMiles: longest };
-}
-
-/** The cycling headline stat's current value, by index into RUN_METRIC_LABELS. */
-function runHeadlineValue(metrics: RunRangeMetrics, index: number, unitSystem: UnitSystem): string {
-  if (index === 0) {
-    return metrics.totalDistanceMiles > 0
-      ? `${toDisplayDistance(metrics.totalDistanceMiles, unitSystem)} ${distanceUnitLabel(unitSystem)}`
-      : '—';
-  }
-  if (index === 1) {
-    return metrics.bestPaceSecPerMile !== null ? formatPace(metrics.bestPaceSecPerMile, unitSystem) : '—';
-  }
-  return metrics.longestRunMiles !== null
-    ? `${toDisplayDistance(metrics.longestRunMiles, unitSystem)} ${distanceUnitLabel(unitSystem)}`
-    : '—';
+  return { totalDistanceMiles: total, bestPaceSecPerMile: bestPace };
 }
 
 const MENU_MAX_HEIGHT = 220;

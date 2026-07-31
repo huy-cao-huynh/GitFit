@@ -14,6 +14,7 @@ import Animated, {
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { Colors, Motion, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 
 const REORDER_TIMING = { duration: Motion.fast };
 
@@ -99,6 +100,7 @@ function SortableRow({
     .onStart(() => {
       isActive.value = true;
       startY.value = (positions.value[id] ?? 0) * rowHeight;
+      scheduleOnRN(haptics.selection);
     })
     .onUpdate((event) => {
       const y = startY.value + event.translationY;
@@ -115,6 +117,7 @@ function SortableRow({
       }
       next[id] = newIndex;
       positions.value = next;
+      scheduleOnRN(haptics.selection);
     })
     .onEnd(() => {
       isActive.value = false;

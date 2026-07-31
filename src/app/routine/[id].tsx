@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
@@ -20,6 +21,7 @@ import { SortableList } from '@/components/sortable-list';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { describeExerciseSets } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, Routine, RoutineExercise, RoutineSet, UnitSystem, Weekday } from '@/lib/store/types';
@@ -73,7 +75,15 @@ export default function RoutineEditorScreen() {
   const dirtyRef = useRef(false);
   const bypassPromptRef = useRef(false);
   const markDirty = () => {
+    if (dirtyRef.current) return;
     dirtyRef.current = true;
+    // Disable the interactive swipe-down-to-dismiss gesture once the form is
+    // dirty, rather than only intercepting it in `beforeRemove` below — by
+    // the time that listener's Alert opens, the native modal-sheet gesture
+    // may already be visually mid-dismissal, so "Keep Editing" has nothing
+    // left to resync. Cancel/hardware-back still go through `beforeRemove`
+    // since gestureEnabled only affects the edge-swipe, not programmatic nav.
+    navigation.setOptions({ gestureEnabled: false });
   };
 
   const setName = (value: string) => {
@@ -113,6 +123,7 @@ export default function RoutineEditorScreen() {
       })),
     };
     bypassPromptRef.current = true;
+    haptics.notification(Haptics.NotificationFeedbackType.Success);
     if (existing) {
       updateRoutine(routine);
     } else {
@@ -124,6 +135,7 @@ export default function RoutineEditorScreen() {
   const handleDelete = () => {
     if (!existing) return;
     bypassPromptRef.current = true;
+    haptics.notification(Haptics.NotificationFeedbackType.Warning);
     deleteRoutine(existing.id);
     router.back();
   };
@@ -180,6 +192,7 @@ export default function RoutineEditorScreen() {
 
   const handleDeleteExercise = () => {
     if (!editingExercise) return;
+    haptics.notification(Haptics.NotificationFeedbackType.Warning);
     deleteExercise(editingExercise.id);
     setEditingExercise(null);
   };

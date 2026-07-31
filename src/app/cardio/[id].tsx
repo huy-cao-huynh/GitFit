@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardioSummary } from '@/components/cardio-summary';
@@ -125,11 +125,11 @@ export default function CardioSessionScreen() {
         activityType,
         minutes,
         distanceMiles,
-        elevationGainFt: tracked.elevationGainFt,
+        elevationGainFt: tracked.elevationGainFt ?? undefined,
         bodyweightLb: latestBodyweightLb(bodyweight),
       }),
       route: tracked.samples.length > 1 ? tracked.samples : undefined,
-      elevationGainFt: tracked.samples.length > 1 ? tracked.elevationGainFt : undefined,
+      elevationGainFt: tracked.elevationGainFt ?? undefined,
       avgPaceSecPerMile:
         distanceMiles && distanceMiles > 0 ? tracked.movingSeconds / distanceMiles : undefined,
     };
@@ -191,7 +191,7 @@ export default function CardioSessionScreen() {
   };
 
   const saveManualDistance = () => {
-    const tracked = result ?? { samples: [], distanceMiles: 0, movingSeconds: 0, elevationGainFt: 0, avgPaceSecPerMile: null };
+    const tracked = result ?? { samples: [], distanceMiles: 0, movingSeconds: 0, elevationGainFt: null, avgPaceSecPerMile: null };
     const raw = distanceDisplay.trim()
       ? fromDisplayDistanceForActivity(Number(distanceDisplay), activityType, unitSystem)
       : undefined;
@@ -334,7 +334,7 @@ export default function CardioSessionScreen() {
                   ) : (
                     'finding your pace…'
                   )}
-                  {tracking.elevationGainFt >= 1 ? (
+                  {tracking.elevationGainFt != null && tracking.elevationGainFt >= 1 ? (
                     <>
                       {'   ·   climb '}
                       <ThemedText type="statInline">
@@ -367,9 +367,14 @@ export default function CardioSessionScreen() {
             </ThemedText>
           ) : null}
           {tracking.permission === 'foreground' ? (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.captionRow}>
-              Background location is off — keep the screen on or the route will stop recording.
-            </ThemedText>
+            <Pressable onPress={() => Linking.openSettings()}>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.captionRow}>
+                Background location is off — keep the screen on or the route will stop recording.{' '}
+                <ThemedText type="small" themeColor="primary">
+                  Turn on in Settings
+                </ThemedText>
+              </ThemedText>
+            </Pressable>
           ) : null}
 
           <Pressable style={styles.primaryButton} onPress={togglePause}>

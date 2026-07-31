@@ -12,6 +12,7 @@ import Svg, {
 
 import { Colors, Fonts } from '@/constants/theme';
 import { smoothLinePath } from '@/lib/chart-path';
+import { buildTicks, defaultTickFormat } from '@/lib/chart-ticks';
 import type { ProgressPoint } from '@/lib/store/types';
 
 interface LineChartProps {
@@ -31,32 +32,6 @@ const PADDING = { top: 10, right: 10, bottom: 20, left: 40 };
 const SPARK_PADDING = { top: 4, right: 4, bottom: 4, left: 4 };
 const MAX_DOTS = 16;
 
-function niceStep(rough: number): number {
-  const power = Math.pow(10, Math.floor(Math.log10(rough)));
-  const normalized = rough / power;
-  const step = normalized >= 5 ? 10 : normalized >= 2 ? 5 : normalized >= 1 ? 2 : 1;
-  return step * power;
-}
-
-/** 3–4 round-numbered ticks spanning the data. */
-function buildTicks(min: number, max: number): number[] {
-  if (min === max) {
-    min -= 1;
-    max += 1;
-  }
-  const step = niceStep((max - min) / 3);
-  const start = Math.floor(min / step) * step;
-  const ticks: number[] = [];
-  for (let tick = start; tick <= max + step / 2; tick += step) ticks.push(tick);
-  return ticks;
-}
-
-function defaultFormat(value: number): string {
-  if (value >= 10000) return `${Math.round(value / 1000)}k`;
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return String(Math.round(value));
-}
-
 function formatDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
     month: 'short',
@@ -71,7 +46,7 @@ export function LineChart({
   height = 160,
   color,
   showArea = true,
-  yFormatter = defaultFormat,
+  yFormatter = defaultTickFormat,
   sparkline = false,
   smooth = false,
 }: LineChartProps) {

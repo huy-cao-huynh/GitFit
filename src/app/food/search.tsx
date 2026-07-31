@@ -18,14 +18,14 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
+import { searchFoods } from '@/lib/nutrition/usda-food-data-central';
 import {
   gramsToOunces,
   macrosForGrams,
   ouncesToGrams,
   parseServingGrams,
-  searchFoods,
   type FoodSearchResult,
-} from '@/lib/nutrition/open-food-facts';
+} from '@/lib/nutrition/units';
 import {
   MEAL_LABELS,
   MEAL_ORDER,

@@ -6,17 +6,17 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import Svg, { Path } from 'react-native-svg';
 
 import { Chevron } from '@/components/chevron';
+import { MuscleChipRow } from '@/components/muscle-chip-row';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Motion, Radius, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS } from '@/lib/activity-icons';
 import { haptics } from '@/lib/haptics';
-import { muscleGroupsFor } from '@/lib/muscles';
+import { muscleChipsFor } from '@/lib/muscles';
 import { estimateRoutineCalories, type ScheduledRoutineTask } from '@/lib/store/derive';
 import type { Routine, RoutineExercise } from '@/lib/store/types';
 import { formatDuration } from '@/lib/format';
 
 const colors = Colors;
-const MAX_MUSCLE_CHIPS = 4;
 
 /**
  * Today's scheduled workout, expanded enough to decide from: what it hits, how
@@ -116,15 +116,7 @@ function WorkoutCard({ task }: { task: ScheduledRoutineTask }) {
         </Pressable>
       </View>
 
-      {muscles.length > 0 ? (
-        <View style={styles.chipRow}>
-          {muscles.map((muscle) => (
-            <View key={muscle} style={styles.muscleChip}>
-              <ThemedText type="caption">{muscle}</ThemedText>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      <MuscleChipRow muscles={muscles} />
 
       {isCardio ? (
         <ThemedText type="small" themeColor="textSecondary">
@@ -176,17 +168,6 @@ function RestDayCard() {
       </ThemedText>
     </View>
   );
-}
-
-/** Deduped muscle groups across a routine's exercises, capped so the row stays one or two lines. */
-function muscleChipsFor(routine: Routine): string[] {
-  const seen: string[] = [];
-  for (const exercise of routine.exercises) {
-    for (const group of muscleGroupsFor(exercise.name)) {
-      if (!seen.includes(group)) seen.push(group);
-    }
-  }
-  return seen.slice(0, MAX_MUSCLE_CHIPS);
 }
 
 /** Bare "sets × reps" numbers, e.g. "3 × 8" — no weight, no unit words. The card is a glance-preview, not the routine editor. */
@@ -264,17 +245,6 @@ const styles = StyleSheet.create({
   },
   playButtonPressed: {
     backgroundColor: colors.primaryDark,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  muscleChip: {
-    borderRadius: Radius.sm,
-    backgroundColor: colors.primaryTint,
-    paddingHorizontal: Spacing.two + Spacing.one,
-    paddingVertical: Spacing.one,
   },
   summaryRow: {
     flexDirection: 'row',

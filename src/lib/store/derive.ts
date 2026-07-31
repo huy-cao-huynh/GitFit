@@ -139,8 +139,56 @@ export function latestBodyweightLb(bodyweight: BodyweightEntry[]): number | unde
   return bodyweight.length ? bodyweight[bodyweight.length - 1].weight : undefined;
 }
 
-/** Same placeholder-until-HealthKit heuristic, for strength sessions. */
+/** Placeholder-until-HealthKit heuristic for strength sessions, and the fallback rate for any exercise `muscleGroupsFor` can't classify. */
 export const STRENGTH_CALORIES_PER_MINUTE = 8;
+
+/**
+ * Rough calories/minute by muscle group, so a leg-heavy routine reads
+ * higher than an arm-heavy one of the same duration instead of both hitting
+ * the flat `STRENGTH_CALORIES_PER_MINUTE`. Same "placeholder until
+ * HealthKit" spirit as the cardio table above — ordered roughly by how much
+ * muscle mass (and therefore work) a group represents.
+ */
+const MUSCLE_GROUP_CALORIES_PER_MINUTE: Record<string, number> = {
+  'Full body': 11,
+  Quads: 9,
+  Hamstrings: 9,
+  Glutes: 9,
+  Cardio: 10,
+  Back: 8,
+  Chest: 7.5,
+  Shoulders: 6.5,
+  Calves: 6,
+  Core: 6,
+  Biceps: 5,
+  Triceps: 5,
+};
+
+/** Averages the per-muscle-group rate across whatever `muscleGroupsFor` matched, or the flat fallback if it matched nothing. */
+function caloriesPerMinuteFor(exerciseName: string): number {
+  const groups = muscleGroupsFor(exerciseName);
+  if (groups.length === 0) return STRENGTH_CALORIES_PER_MINUTE;
+  const sum = groups.reduce((total, group) => total + (MUSCLE_GROUP_CALORIES_PER_MINUTE[group] ?? STRENGTH_CALORIES_PER_MINUTE), 0);
+  return sum / groups.length;
+}
+
+/**
+ * Splits `minutes` across exercises by their share of total sets, weights
+ * each share by that exercise's muscle-group rate, and sums the result —
+ * so a squat-and-deadlift session estimates higher than a curl-and-pushdown
+ * one of the same length. Falls back to the flat rate when there are no
+ * sets to weight by (e.g. an empty routine preview).
+ */
+function weightedCalories(exercises: { name: string; sets: unknown[] }[], minutes: number): number {
+  const totalSets = exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
+  if (totalSets === 0) return Math.round(minutes * STRENGTH_CALORIES_PER_MINUTE);
+
+  const calories = exercises.reduce((sum, exercise) => {
+    const share = exercise.sets.length / totalSets;
+    return sum + share * minutes * caloriesPerMinuteFor(exercise.name);
+  }, 0);
+  return Math.round(calories);
+}
 
 /**
  * Estimated burn for a strength routine before it's been run — what the
@@ -148,7 +196,12 @@ export const STRENGTH_CALORIES_PER_MINUTE = 8;
  * callers only ever invoke this for strength routines.
  */
 export function estimateRoutineCalories(routine: Routine): number {
-  return routine.durationMinutes * STRENGTH_CALORIES_PER_MINUTE;
+  return weightedCalories(routine.exercises, routine.durationMinutes);
+}
+
+/** Same weighting as `estimateRoutineCalories`, but over the sets actually logged so far — for the live in-session estimate and the saved session's calorie total. */
+export function estimateSessionCalories(exercises: { name: string; sets: unknown[] }[], minutes: number): number {
+  return weightedCalories(exercises, minutes);
 }
 
 export function toDateKey(date: Date): string {
@@ -161,25 +214,27 @@ export function todayKey(): string {
   return toDateKey(new Date());
 }
 
+/** Sunday-first — every weekday picker/calendar in the app (schedule days, the Log tab strip) reads this same order. */
 export const WEEKDAY_OPTIONS: { value: Weekday; short: string; label: string }[] = [
+  { value: 7, short: 'S', label: 'Sunday' },
   { value: 1, short: 'M', label: 'Monday' },
   { value: 2, short: 'T', label: 'Tuesday' },
   { value: 3, short: 'W', label: 'Wednesday' },
   { value: 4, short: 'T', label: 'Thursday' },
   { value: 5, short: 'F', label: 'Friday' },
   { value: 6, short: 'S', label: 'Saturday' },
-  { value: 7, short: 'S', label: 'Sunday' },
 ];
 
-export const CALENDAR_WEEKDAY_OPTIONS: { value: Weekday; short: string; label: string }[] = [
-  { value: 7, short: 'S', label: 'Sunday' },
-  ...WEEKDAY_OPTIONS.slice(0, 6),
-];
-
-/** Sunday-first 3-letter weekday abbreviations for the calendar strip, index-aligned with `CALENDAR_WEEKDAY_OPTIONS`. */
+/** Sunday-first 3-letter weekday abbreviations for the calendar strip, index-aligned with `WEEKDAY_OPTIONS`. */
 const CALENDAR_WEEKDAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
-function dateFromKey(dateKey: string): Date {
+/**
+ * Parses a `YYYY-MM-DD` key as local midnight. `new Date(dateKey)` parses
+ * date-only ISO strings as UTC midnight instead, which silently rolls back a
+ * day in any timezone behind UTC — always go through this, never the bare
+ * constructor, for a stored date key.
+ */
+export function dateFromKey(dateKey: string): Date {
   const [year, month, day] = dateKey.split('-').map(Number);
   return new Date(year, month - 1, day);
 }
@@ -267,7 +322,7 @@ export function unscheduledCompletedWorkouts(
       name: session.routineName,
       category: 'strength' as const,
       minutes: session.durationMinutes,
-      calories: session.calories ?? Math.round(session.durationMinutes * STRENGTH_CALORIES_PER_MINUTE),
+      calories: session.calories ?? estimateSessionCalories(session.exercises, session.durationMinutes),
     }));
   const cardio = cardioSessions
     .filter((session) => session.date === dateKey && !(session.routineId && scheduledIds.has(session.routineId)))
@@ -292,7 +347,7 @@ export function calendarWeekDays(
   sunday.setDate(anchorDate.getDate() - (weekday === 7 ? 0 : weekday));
   const todaysKey = todayKey();
 
-  return CALENDAR_WEEKDAY_OPTIONS.map((option, index) => {
+  return WEEKDAY_OPTIONS.map((option, index) => {
     const date = new Date(sunday);
     date.setDate(sunday.getDate() + index);
     const dateKey = toDateKey(date);
@@ -333,7 +388,7 @@ export function checkoffWeek(
   sunday.setDate(anchorDate.getDate() - (weekday === 7 ? 0 : weekday));
   const todaysKey = todayKey();
 
-  return CALENDAR_WEEKDAY_OPTIONS.map((option, index) => {
+  return WEEKDAY_OPTIONS.map((option, index) => {
     const date = new Date(sunday);
     date.setDate(sunday.getDate() + index);
     const dateKey = toDateKey(date);
@@ -706,7 +761,7 @@ export function bmi(weightLbs: number | null | undefined, heightInches: number |
 
 export function ageFromBirthday(birthday: string | null | undefined): number | null {
   if (!birthday) return null;
-  const parsed = new Date(birthday);
+  const parsed = dateFromKey(birthday);
   if (Number.isNaN(parsed.getTime())) return null;
   const today = new Date();
   let age = today.getFullYear() - parsed.getFullYear();

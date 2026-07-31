@@ -21,9 +21,10 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** Merges keys (full_name, birthday, …) into Supabase user_metadata. */
   updateProfile: (data: Record<string, string>) => Promise<void>;
-  /** Sends a confirmation email to the new address before it takes effect. */
+  /** Sends a confirmation email to the new address (and the old one, if Secure Email Change is on) before it takes effect. */
   updateEmail: (email: string) => Promise<void>;
-  updatePassword: (password: string) => Promise<void>;
+  /** Reauthenticates with the current password before setting the new one. */
+  updatePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -73,6 +74,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => subscription.subscription.unsubscribe();
   }, []);
 
+  // Confirmation links (email change, password recovery, …) open the app via
+  // the mygymapp:// scheme rather than the in-app browser session used by
+  // Google sign-in, so they need their own listener — both for a link tapped
+  // while the app is already running and for a cold start from the link.
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      if (url) createSessionFromUrl(url).catch((error) => console.warn('Deep link sign-in failed', error));
+    });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      createSessionFromUrl(url).catch((error) => console.warn('Deep link sign-in failed', error));
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   const signInWithEmail = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
@@ -119,12 +136,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const updateEmail = async (email: string) => {
-    const { error } = await supabase.auth.updateUser({ email });
+    const { error } = await supabase.auth.updateUser(
+      { email },
+      { emailRedirectTo: Linking.createURL('/') },
+    );
     if (error) throw error;
   };
 
-  const updatePassword = async (password: string) => {
-    const { error } = await supabase.auth.updateUser({ password });
+  const updatePassword = async (currentPassword: string, newPassword: string) => {
+    if (!session?.user.email) throw new Error('You must be signed in to change your password.');
+    if (newPassword === currentPassword) {
+      throw new Error('New password must be different from your current password.');
+    }
+
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email: session.user.email,
+      password: currentPassword,
+    });
+    if (reauthError) throw reauthError;
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
   };
 

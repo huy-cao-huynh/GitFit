@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -15,7 +16,7 @@ import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
 import { muscleGroupsFor } from '@/lib/muscles';
-import { describeExerciseSets, exercisePR, lastExercisePerformance, STRENGTH_CALORIES_PER_MINUTE, todayKey } from '@/lib/store/derive';
+import { describeExerciseSets, estimateSessionCalories, exercisePR, lastExercisePerformance, todayKey } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, RoutineExercise, RoutineSet, Session, SessionExercise, SetLog, UnitSystem } from '@/lib/store/types';
 import { clampToStep, formatStepperValue } from '@/lib/stepper-math';
@@ -244,7 +245,10 @@ export default function ActiveWorkoutScreen() {
   const plannedSetCount = totalPlannedSets(exercise);
   const isLastSet = setIndex + 1 >= plannedSetCount;
   const isLastExercise = exerciseIndex + 1 >= order.length;
-  const workoutCalories = Math.max(1, Math.round(elapsedSec / 60)) * STRENGTH_CALORIES_PER_MINUTE;
+  const workoutCalories = estimateSessionCalories(
+    logged.map((item) => ({ name: item.name, sets: item.sets.filter((set) => !set.skipped) })),
+    Math.max(1, Math.round(elapsedSec / 60)),
+  );
 
   const lastPerformance = lastExercisePerformance(sessions, exercise.name);
   const personalRecord = exercisePR(sessions, exercise.name);
@@ -322,6 +326,7 @@ export default function ActiveWorkoutScreen() {
   };
 
   const skipSet = () => {
+    haptics.impact();
     const warmupFlag = isWarmupSet || undefined;
     completeSet(
       exerciseKind === 'time'
@@ -365,6 +370,7 @@ export default function ActiveWorkoutScreen() {
 
   /** Marks every remaining set of the current exercise as skipped and moves on. */
   const skipExercise = () => {
+    haptics.impact(Haptics.ImpactFeedbackStyle.Medium);
     const remainingSets: SetLog[] = exercise.sets.slice(setIndex).map((set) => ({
       kind: exerciseKind,
       skipped: true,
@@ -395,7 +401,10 @@ export default function ActiveWorkoutScreen() {
       routineName: routine.name,
       date: todayKey(),
       durationMinutes,
-      calories: durationMinutes * STRENGTH_CALORIES_PER_MINUTE,
+      calories: estimateSessionCalories(
+        finalLogged.map((item) => ({ name: item.name, sets: item.sets.filter((set) => !set.skipped) })),
+        durationMinutes,
+      ),
       exercises: finalLogged.filter((item) => item.sets.some((set) => !set.skipped)),
     };
   };
@@ -864,6 +873,12 @@ function TargetCard({
 }) {
   const isPRAttempt =
     !isWarmup && kind === 'reps' && personalRecord !== null && (set.weight ?? 0) > personalRecord.weight;
+
+  useEffect(() => {
+    // Only re-fires when the PR-attempt status itself flips, not on every
+    // target-card re-render (e.g. a rest-timer tick re-rendering the parent).
+    if (isPRAttempt) haptics.notification(Haptics.NotificationFeedbackType.Success);
+  }, [isPRAttempt]);
 
   return (
     <ThemedView type="surface" style={styles.targetCard}>

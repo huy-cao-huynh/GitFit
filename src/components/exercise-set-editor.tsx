@@ -1,11 +1,13 @@
+import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { SortableList } from '@/components/sortable-list';
 import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, RoutineSet, UnitSystem } from '@/lib/store/types';
 import { clampToStep, formatStepperValue } from '@/lib/stepper-math';
@@ -22,8 +24,11 @@ const DEFAULT_REPS = 8;
  * kind so repeated-weight sets are one tap, while still letting each row
  * diverge for pyramid sets) and a single rest stepper. Whether a set is a
  * warm-up is fixed by which Add button created it — there's no per-row
- * toggle. Used both in the routine editor's Add/Edit Exercise sheet and the
- * live session's mid-workout quick-edit screen.
+ * toggle. New warm-up sets are inserted after the last existing warm-up
+ * (keeping all warm-ups before working sets) while new working sets append
+ * to the end; drag-to-reorder can still override this. Used both in the
+ * routine editor's Add/Edit Exercise sheet and the live session's
+ * mid-workout quick-edit screen.
  */
 export function ExerciseSetEditor({
   sets,
@@ -47,7 +52,13 @@ export function ExerciseSetEditor({
       : kind === 'time'
         ? { id: makeId(), isWarmup, durationSec: 30 }
         : { id: makeId(), isWarmup, reps: DEFAULT_REPS, weight: 0 };
-    onChangeSets([...sets, next]);
+    if (isWarmup) {
+      const lastWarmupIndex = sets.reduce((last, set, index) => (set.isWarmup ? index : last), -1);
+      const insertAt = lastWarmupIndex + 1;
+      onChangeSets([...sets.slice(0, insertAt), next, ...sets.slice(insertAt)]);
+    } else {
+      onChangeSets([...sets, next]);
+    }
   };
 
   const patchSet = (id: string, patch: Partial<RoutineSet>) => {
@@ -55,6 +66,9 @@ export function ExerciseSetEditor({
   };
 
   const removeSet = (id: string) => {
+    // No confirmation dialog on this delete — the haptic is the only
+    // feedback the user gets that the tap registered and removed a row.
+    haptics.impact(Haptics.ImpactFeedbackStyle.Medium);
     onChangeSets(sets.filter((set) => set.id !== id));
   };
 
@@ -184,6 +198,15 @@ function EditableValue({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatStepperValue(value));
+  const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    // See Stepper's identical fix: focusing after mount (instead of
+    // autoFocus) lets selectTextOnFocus reliably highlight the old value.
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [editing]);
 
   const commit = () => {
     const parsed = Number(draft);
@@ -194,6 +217,7 @@ function EditableValue({
   if (editing) {
     return (
       <TextInput
+        ref={inputRef}
         style={styles.valueInput}
         value={draft}
         onChangeText={setDraft}
@@ -201,7 +225,6 @@ function EditableValue({
         onSubmitEditing={commit}
         keyboardType="decimal-pad"
         selectTextOnFocus
-        autoFocus
       />
     );
   }

@@ -1,20 +1,23 @@
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Rect } from 'react-native-svg';
 
 import { Chevron } from '@/components/chevron';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS, ACTIVITY_LABELS, ACTIVITY_TYPES } from '@/lib/activity-icons';
 import { scheduledRoutineTasks, todayKey } from '@/lib/store/derive';
-import type { CardioActivityType, Routine } from '@/lib/store/types';
+import type { CardioActivityType, Routine, WorkoutCategory } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
+
+const CATEGORY_LABELS: Record<WorkoutCategory, string> = { strength: 'Strength', cardio: 'Cardio' };
 
 interface Section {
   title: string;
@@ -23,7 +26,17 @@ interface Section {
 
 export default function ChooseWorkoutScreen() {
   const { routines, sessions, cardioSessions } = useStore();
-  const [showActivityPicker, setShowActivityPicker] = useState(false);
+  const [category, setCategory] = useState<WorkoutCategory>('strength');
+  const [segmentedWidth, setSegmentedWidth] = useState(0);
+
+  const segmentWidth = segmentedWidth > 0 ? (segmentedWidth - Spacing.half * 2) / 2 : 0;
+  const position = useSharedValue(category === 'strength' ? 0 : 1);
+  useEffect(() => {
+    position.value = withTiming(category === 'strength' ? 0 : 1, { duration: Motion.base });
+  }, [category, position]);
+  const segmentPillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: position.value * segmentWidth }],
+  }));
 
   const startAdHocCardio = (activityType: CardioActivityType) => {
     router.back();
@@ -35,13 +48,18 @@ export default function ChooseWorkoutScreen() {
     .map((task) => task.routine);
   const strengthRoutines = routines.filter((routine) => routine.category === 'strength');
   const cardioRoutines = routines.filter((routine) => routine.category === 'cardio');
+  const categoryRoutines = category === 'strength' ? strengthRoutines : cardioRoutines;
 
+  // "Today's Planned" stays pinned above the segment regardless of category —
+  // it's what you'd actually start next, not a third option to choose
+  // between. Everything below it is scoped to one category at a time so
+  // strength routines, cardio routines, and the ad-hoc activity picker are
+  // never all stacked in one undifferentiated list.
   const sections: Section[] = [
     ...(plannedRoutines.length > 0
       ? [{ title: plannedRoutines.length > 1 ? "Today's Planned Workouts" : "Today's Planned Workout", data: plannedRoutines }]
       : []),
-    ...(strengthRoutines.length > 0 ? [{ title: 'Strength', data: strengthRoutines }] : []),
-    ...(cardioRoutines.length > 0 ? [{ title: 'Cardio', data: cardioRoutines }] : []),
+    ...(categoryRoutines.length > 0 ? [{ title: `${CATEGORY_LABELS[category]} Routines`, data: categoryRoutines }] : []),
   ];
 
   return (
@@ -57,6 +75,22 @@ export default function ChooseWorkoutScreen() {
           <View style={styles.headerSpacer} />
         </View>
 
+        <View style={styles.segmented} onLayout={(e) => setSegmentedWidth(e.nativeEvent.layout.width)}>
+          {segmentWidth > 0 && (
+            <Animated.View style={[styles.segmentPill, { width: segmentWidth }, segmentPillStyle]} />
+          )}
+          {(['strength', 'cardio'] as WorkoutCategory[]).map((option) => {
+            const active = category === option;
+            return (
+              <Pressable key={option} style={styles.segment} onPress={() => setCategory(option)}>
+                <ThemedText type="smallBold" style={active ? { color: colors.onPrimary } : undefined}>
+                  {CATEGORY_LABELS[option]}
+                </ThemedText>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <SectionList
           sections={sections}
           keyExtractor={(routine) => routine.id}
@@ -64,34 +98,29 @@ export default function ChooseWorkoutScreen() {
           stickySectionHeadersEnabled={false}
           ListHeaderComponent={
             <View style={styles.createSection}>
-              <View style={styles.createRow}>
+              {category === 'strength' ? (
                 <Pressable style={styles.createOption} onPress={() => router.push('/routine/new')}>
                   <View style={styles.createIcon}>
                     <ThemedText style={styles.createIconText}>+</ThemedText>
                   </View>
                   <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-                    New Strength
+                    New Strength Workout
                   </ThemedText>
                 </Pressable>
-                <Pressable style={styles.createOption} onPress={() => setShowActivityPicker((v) => !v)}>
-                  <View style={styles.createIcon}>
-                    <ThemedText style={styles.createIconText}>+</ThemedText>
+              ) : (
+                <>
+                  <ThemedText type="label" style={styles.sectionLabel}>
+                    START AN ACTIVITY
+                  </ThemedText>
+                  <View style={styles.activityGrid}>
+                    {ACTIVITY_TYPES.map((option) => (
+                      <Pressable key={option} style={styles.activityChip} onPress={() => startAdHocCardio(option)}>
+                        <SymbolView name={ACTIVITY_ICONS[option]} size={14} tintColor={colors.primaryLight} />
+                        <ThemedText type="small">{ACTIVITY_LABELS[option]}</ThemedText>
+                      </Pressable>
+                    ))}
                   </View>
-                  <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
-                    New Cardio
-                  </ThemedText>
-                </Pressable>
-              </View>
-              {/* Cardio has nothing to configure — pick an activity and start moving. */}
-              {showActivityPicker && (
-                <View style={styles.activityGrid}>
-                  {ACTIVITY_TYPES.map((option) => (
-                    <Pressable key={option} style={styles.activityChip} onPress={() => startAdHocCardio(option)}>
-                      <SymbolView name={ACTIVITY_ICONS[option]} size={14} tintColor={colors.primaryLight} />
-                      <ThemedText type="small">{ACTIVITY_LABELS[option]}</ThemedText>
-                    </Pressable>
-                  ))}
-                </View>
+                </>
               )}
             </View>
           }
@@ -103,7 +132,7 @@ export default function ChooseWorkoutScreen() {
           renderItem={({ item }) => <RoutineRow routine={item} />}
           ListEmptyComponent={
             <ThemedText type="small" themeColor="textSecondary">
-              No workouts yet — create one to get started.
+              No {CATEGORY_LABELS[category].toLowerCase()} workouts yet — create one to get started.
             </ThemedText>
           }
         />
@@ -176,6 +205,27 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 44,
   },
+  segmented: {
+    flexDirection: 'row',
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+    padding: Spacing.half,
+    marginBottom: Spacing.three,
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: Radius.sm,
+    paddingVertical: Spacing.two,
+  },
+  segmentPill: {
+    position: 'absolute',
+    top: Spacing.half,
+    bottom: Spacing.half,
+    left: Spacing.half,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.primary,
+  },
   list: {
     gap: Spacing.two,
     paddingBottom: Spacing.six,
@@ -187,10 +237,6 @@ const styles = StyleSheet.create({
   },
   createSection: {
     marginBottom: Spacing.three,
-  },
-  createRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
   },
   activityGrid: {
     flexDirection: 'row',

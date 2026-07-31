@@ -20,7 +20,7 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { METRIC_ICONS } from '@/lib/metric-icons';
 import {
-  CALENDAR_WEEKDAY_OPTIONS,
+  WEEKDAY_OPTIONS,
   calendarWeekDays,
   estimateRoutineCalories,
   scheduledRoutineTasks,
@@ -416,7 +416,7 @@ export default function LoggingScreen() {
                         </Pressable>
                       </View>
                       <View style={styles.weekdayChipRow}>
-                        {CALENDAR_WEEKDAY_OPTIONS.map((day) => {
+                        {WEEKDAY_OPTIONS.map((day) => {
                           const active = goal.target === day.value;
                           return (
                             <Pressable

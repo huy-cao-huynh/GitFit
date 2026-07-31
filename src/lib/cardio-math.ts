@@ -79,10 +79,15 @@ export function smoothedAltitudesFt(points: GpsPoint[]): (number | null)[] {
  * Total climb, as the sum of positive deltas across the smoothed altitude
  * series. Raw GPS altitude is noisy enough that summing unsmoothed deltas
  * wildly overstates gain; this is a deliberate approximation.
+ *
+ * Returns `null` rather than `0` when there isn't enough altitude data to
+ * say anything — `location.coords.altitude` is frequently missing on
+ * GPS-only fixes, and a bare `0` there would be indistinguishable from "we
+ * checked and this route is flat."
  */
-export function smoothedElevationGainFt(points: GpsPoint[]): number {
+export function smoothedElevationGainFt(points: GpsPoint[]): number | null {
   const known = smoothedAltitudesFt(points).filter((value): value is number => value != null);
-  if (known.length < ELEVATION_SMOOTHING_WINDOW + 1) return 0;
+  if (known.length < ELEVATION_SMOOTHING_WINDOW + 1) return null;
 
   let gain = 0;
   for (let i = 1; i < known.length; i++) {

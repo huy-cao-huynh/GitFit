@@ -33,6 +33,13 @@ const DISTANCE_INTERVAL_M = 5;
 const POLL_INTERVAL_MS = 1000;
 /** Fixes vaguer than this are noise — keeping them makes distance creep upward while standing still. */
 const MAX_ACCURACY_M = 35;
+/**
+ * A fix implying a faster speed than this from the last accepted point is a
+ * GPS jitter/teleport artifact (e.g. a signal-reacquisition jump), not real
+ * motion — accepting it corrupts both distance and pace off a single bad
+ * sample. Generous enough to never reject genuine fast downhill cycling.
+ */
+const MAX_IMPLIED_SPEED_MPH = 55;
 /** Trailing window behind the live "current pace" readout. */
 const ROLLING_PACE_WINDOW_MS = 30_000;
 /** Under this, a pace figure is a division by nearly nothing and reads as nonsense. */
@@ -71,14 +78,26 @@ function appendFix(location: Location.LocationObject) {
   const { accuracy } = location.coords;
   if (accuracy != null && accuracy > MAX_ACCURACY_M) return;
 
-  session.points.push({
+  const point: GpsPoint = {
     lat: location.coords.latitude,
     lng: location.coords.longitude,
     altitude: location.coords.altitude ?? undefined,
     t: location.timestamp,
     e: movingMs(session, Date.now()),
-  });
+  };
+
+  const last = session.points[session.points.length - 1];
+  if (last && isImplausibleJump(last, point)) return;
+
+  session.points.push(point);
   persist();
+}
+
+function isImplausibleJump(last: GpsPoint, point: GpsPoint): boolean {
+  const hours = (elapsedOf(point) - elapsedOf(last)) / 1000 / 3600;
+  if (hours <= 0) return false;
+  const impliedMph = haversineMiles(last, point) / hours;
+  return impliedMph > MAX_IMPLIED_SPEED_MPH;
 }
 
 /**
@@ -130,7 +149,8 @@ export interface CardioTrackingResult {
   samples: GpsPoint[];
   distanceMiles: number;
   movingSeconds: number;
-  elevationGainFt: number;
+  /** `null` when there isn't enough altitude data to say anything, distinct from a real flat-route `0`. */
+  elevationGainFt: number | null;
   avgPaceSecPerMile: number | null;
 }
 
@@ -260,7 +280,7 @@ const IDLE_STATE: CardioTrackingState = {
   samples: [],
   distanceMiles: 0,
   movingSeconds: 0,
-  elevationGainFt: 0,
+  elevationGainFt: null,
   avgPaceSecPerMile: null,
   currentPaceSecPerMile: null,
   isPaused: false,
@@ -327,7 +347,7 @@ function readLiveState(): Omit<CardioTrackingState, 'permission'> {
 // ---------------------------------------------------------------------------
 
 function summarize(active: ActiveSession | null, at = Date.now()): CardioTrackingResult {
-  if (!active) return { samples: [], distanceMiles: 0, movingSeconds: 0, elevationGainFt: 0, avgPaceSecPerMile: null };
+  if (!active) return { samples: [], distanceMiles: 0, movingSeconds: 0, elevationGainFt: null, avgPaceSecPerMile: null };
   const samples = active.points.slice();
   const distanceMiles = totalDistanceMiles(samples);
   const movingSeconds = Math.floor(movingMs(active, at) / 1000);

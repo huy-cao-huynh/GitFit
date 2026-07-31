@@ -193,9 +193,7 @@ export default function LoginScreen() {
                       themeVariant="dark"
                       accentColor={Colors.primaryLight}
                       maximumDate={new Date()}
-                      onChange={(_event, selected) => {
-                        if (selected) setBirthday(selected);
-                      }}
+                      onValueChange={(_event, selected) => setBirthday(selected)}
                     />
                   </View>
                 </Field>

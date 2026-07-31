@@ -1,3 +1,5 @@
+import type { Routine } from '@/lib/store/types';
+
 /**
  * Keyword-based mapping from exercise names to targeted muscle groups, used
  * for the chips on the workout-session screens. First matching rule wins, so
@@ -31,4 +33,17 @@ export function muscleGroupsFor(exerciseName: string): string[] {
     if (rule.pattern.test(exerciseName)) return rule.groups;
   }
   return [];
+}
+
+export const MAX_MUSCLE_CHIPS = 4;
+
+/** Deduped muscle groups across a routine's exercises, capped so a chip row stays one or two lines. */
+export function muscleChipsFor(routine: Routine): string[] {
+  const seen: string[] = [];
+  for (const exercise of routine.exercises) {
+    for (const group of muscleGroupsFor(exercise.name)) {
+      if (!seen.includes(group)) seen.push(group);
+    }
+  }
+  return seen.slice(0, MAX_MUSCLE_CHIPS);
 }

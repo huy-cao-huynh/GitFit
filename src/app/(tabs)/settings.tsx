@@ -1,7 +1,10 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { isAuthError } from '@supabase/supabase-js';
 import { Image } from 'expo-image';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -17,6 +20,8 @@ import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, Radius, Spacing } from '@/constants/theme';
+import { authErrorMessage } from '@/lib/auth-errors';
+import { dateFromKey, toDateKey } from '@/lib/store/derive';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { formatHeight, fromDisplayLength, lengthUnitLabel, toDisplayLength } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
@@ -26,6 +31,27 @@ import type { UnitSystem } from '@/lib/store/types';
 const colors = Colors;
 
 type Sex = 'male' | 'female' | 'unset';
+
+function defaultBirthday(): Date {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - 25);
+  return date;
+}
+
+function parseBirthday(value: string): Date {
+  if (value) {
+    // dateFromKey, not `new Date(value)` — the latter parses a bare
+    // "YYYY-MM-DD" as UTC midnight, which rolls back a day in any timezone
+    // behind UTC (exactly the "saved the 13th, shows the 12th" bug).
+    const parsed = dateFromKey(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return defaultBirthday();
+}
+
+function formatBirthdayDisplay(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 export default function SettingsScreen() {
   const { session, signOut, updateProfile, updateEmail, updatePassword } = useAuth();
@@ -45,21 +71,24 @@ export default function SettingsScreen() {
   const sex = ((metadata.sex as string | undefined) ?? 'unset') as Sex;
 
   const [draftName, setDraftName] = useState(name);
-  const [draftBirthday, setDraftBirthday] = useState(birthday);
-  const [draftAvatarUrl, setDraftAvatarUrl] = useState(avatarUrl);
+  const [draftBirthday, setDraftBirthday] = useState(() => parseBirthday(birthday));
   const [draftEmail, setDraftEmail] = useState(email);
-  const [draftPassword, setDraftPassword] = useState('');
   const [draftHeight, setDraftHeight] = useState(
     heightInches ? String(toDisplayLength(heightInches, preferences.unitSystem)) : '',
   );
   const [draftSex, setDraftSex] = useState<Sex>(sex);
+  const [birthdayPickerOpen, setBirthdayPickerOpen] = useState(false);
+
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [pwCurrentPassword, setPwCurrentPassword] = useState('');
+  const [pwNewPassword, setPwNewPassword] = useState('');
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSaving, setPwSaving] = useState(false);
 
   const startEditing = () => {
     setDraftName(name);
-    setDraftBirthday(birthday);
-    setDraftAvatarUrl(avatarUrl);
+    setDraftBirthday(parseBirthday(birthday));
     setDraftEmail(email);
-    setDraftPassword('');
     setDraftHeight(heightInches ? String(toDisplayLength(heightInches, preferences.unitSystem)) : '');
     setDraftSex(sex);
     setError(null);
@@ -70,6 +99,8 @@ export default function SettingsScreen() {
   const handleSave = async () => {
     setError(null);
     setInfo(null);
+
+    const draftBirthdayKey = toDateKey(draftBirthday);
     setIsSaving(true);
     try {
       const messages: string[] = [];
@@ -78,15 +109,14 @@ export default function SettingsScreen() {
         : null;
       if (
         draftName.trim() !== name ||
-        draftBirthday.trim() !== birthday ||
-        draftAvatarUrl.trim() !== avatarUrl ||
+        draftBirthdayKey !== birthday ||
         draftHeightInches !== heightInches ||
         draftSex !== sex
       ) {
         await updateProfile({
           full_name: draftName.trim(),
-          birthday: draftBirthday.trim(),
-          avatar_url: draftAvatarUrl.trim(),
+          birthday: draftBirthdayKey,
+          avatar_url: avatarUrl,
           height_inches: draftHeightInches ? String(draftHeightInches) : '',
           sex: draftSex,
         });
@@ -96,14 +126,13 @@ export default function SettingsScreen() {
         await updateEmail(draftEmail.trim());
         messages.push('Check both inboxes to confirm the email change.');
       }
-      if (draftPassword) {
-        await updatePassword(draftPassword);
-        messages.push('Password changed.');
-      }
       setInfo(messages.join(' ') || 'Nothing to save.');
       setIsEditing(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save profile.');
+      // Supabase errors get the friendly mapping; our own client-side
+      // validation throws (e.g. "new password must differ") are already
+      // user-facing copy and should pass through as-is.
+      setError(isAuthError(e) ? authErrorMessage(e) : e instanceof Error ? e.message : 'Failed to save profile.');
     } finally {
       setIsSaving(false);
     }
@@ -114,6 +143,31 @@ export default function SettingsScreen() {
       await signOut();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to sign out.');
+    }
+  };
+
+  const openPasswordModal = () => {
+    setPwCurrentPassword('');
+    setPwNewPassword('');
+    setPwError(null);
+    setShowPasswordModal(true);
+  };
+
+  const handleChangePassword = async () => {
+    setPwError(null);
+    if (!pwCurrentPassword || !pwNewPassword) {
+      setPwError('Enter your current and new password.');
+      return;
+    }
+    setPwSaving(true);
+    try {
+      await updatePassword(pwCurrentPassword, pwNewPassword);
+      setShowPasswordModal(false);
+      setInfo('Password changed.');
+    } catch (e) {
+      setPwError(isAuthError(e) ? authErrorMessage(e) : e instanceof Error ? e.message : 'Failed to change password.');
+    } finally {
+      setPwSaving(false);
     }
   };
 
@@ -159,12 +213,14 @@ export default function SettingsScreen() {
             {isEditing && (
               <ThemedView type="surface" style={styles.editCard}>
                 <ProfileField label="Name" value={draftName} onChangeText={setDraftName} />
-                <ProfileField
-                  label="Birthday"
-                  value={draftBirthday}
-                  onChangeText={setDraftBirthday}
-                  placeholder="YYYY-MM-DD"
-                />
+                <View style={styles.field}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Birthday
+                  </ThemedText>
+                  <Pressable style={styles.birthdayField} onPress={() => setBirthdayPickerOpen(true)}>
+                    <ThemedText type="small">{formatBirthdayDisplay(draftBirthday)}</ThemedText>
+                  </Pressable>
+                </View>
                 <ProfileField
                   label={`Height (${lengthUnitLabel(preferences.unitSystem)})`}
                   value={draftHeight}
@@ -174,7 +230,7 @@ export default function SettingsScreen() {
                 />
                 <View style={styles.field}>
                   <ThemedText type="small" themeColor="textSecondary">
-                    Sex (for the body-fat estimate)
+                    Sex
                   </ThemedText>
                   <View style={styles.sexToggle}>
                     {(['male', 'female', 'unset'] as Sex[]).map((option) => {
@@ -193,25 +249,16 @@ export default function SettingsScreen() {
                   </View>
                 </View>
                 <ProfileField
-                  label="Profile picture URL"
-                  value={draftAvatarUrl}
-                  onChangeText={setDraftAvatarUrl}
-                  placeholder="https://..."
-                  keyboardType="url"
-                />
-                <ProfileField
                   label="Email"
                   value={draftEmail}
                   onChangeText={setDraftEmail}
                   keyboardType="email-address"
                 />
-                <ProfileField
-                  label="New password"
-                  value={draftPassword}
-                  onChangeText={setDraftPassword}
-                  placeholder="Leave blank to keep"
-                  secureTextEntry
-                />
+                <Pressable style={styles.changePasswordRow} onPress={openPasswordModal}>
+                  <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                    Change Password
+                  </ThemedText>
+                </Pressable>
                 <View style={styles.editButtons}>
                   <Pressable style={styles.secondaryButton} onPress={() => setIsEditing(false)}>
                     <ThemedText type="small">Cancel</ThemedText>
@@ -267,6 +314,71 @@ export default function SettingsScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
       </ScreenBackground>
+
+      <Modal
+        transparent
+        visible={birthdayPickerOpen}
+        animationType="fade"
+        onRequestClose={() => setBirthdayPickerOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setBirthdayPickerOpen(false)} />
+        <View style={styles.bottomSheet}>
+          <DateTimePicker
+            value={draftBirthday}
+            mode="date"
+            display="spinner"
+            themeVariant="dark"
+            accentColor={colors.primaryLight}
+            maximumDate={new Date()}
+            onValueChange={(_event, selected) => setDraftBirthday(selected)}
+          />
+          <Pressable style={styles.sheetDoneButton} onPress={() => setBirthdayPickerOpen(false)}>
+            <ThemedText type="smallBold" style={{ color: colors.onPrimary }}>
+              Done
+            </ThemedText>
+          </Pressable>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        visible={showPasswordModal}
+        animationType="fade"
+        onRequestClose={() => setShowPasswordModal(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowPasswordModal(false)} />
+        <View style={styles.bottomSheet}>
+          <ThemedText type="smallBold">Change Password</ThemedText>
+          <ProfileField
+            label="Current password"
+            value={pwCurrentPassword}
+            onChangeText={setPwCurrentPassword}
+            secureTextEntry
+          />
+          <ProfileField
+            label="New password"
+            value={pwNewPassword}
+            onChangeText={setPwNewPassword}
+            secureTextEntry
+          />
+          {pwError && (
+            <ThemedText type="small" style={styles.error}>
+              {pwError}
+            </ThemedText>
+          )}
+          <View style={styles.editButtons}>
+            <Pressable style={styles.secondaryButton} onPress={() => setShowPasswordModal(false)}>
+              <ThemedText type="small">Cancel</ThemedText>
+            </Pressable>
+            <Pressable
+              style={[styles.saveButton, pwSaving && styles.disabled]}
+              disabled={pwSaving}
+              onPress={handleChangePassword}>
+              <ThemedText type="smallBold" style={{ color: colors.onPrimary }}>
+                {pwSaving ? 'Saving…' : 'Save'}
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </TabFadeView>
   );
 }
@@ -376,6 +488,15 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.surfaceElevated,
   },
+  birthdayField: {
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    backgroundColor: colors.surfaceElevated,
+  },
+  changePasswordRow: {
+    paddingVertical: Spacing.one,
+  },
   sexToggle: {
     flexDirection: 'row',
     borderRadius: Radius.md,
@@ -458,5 +579,28 @@ const styles = StyleSheet.create({
   error: {
     color: colors.danger,
     textAlign: 'center',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  bottomSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.six,
+    gap: Spacing.three,
+  },
+  sheetDoneButton: {
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.three,
+    alignItems: 'center',
+    backgroundColor: colors.primary,
   },
 });

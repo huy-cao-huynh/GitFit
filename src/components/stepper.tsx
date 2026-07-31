@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
@@ -28,6 +28,17 @@ export function Stepper({
   const currentValue = Number.isFinite(value) ? value : min;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatStepperValue(currentValue));
+  const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    // Focusing imperatively after mount (rather than via autoFocus) lets
+    // selectTextOnFocus actually land — autoFocus fires before the freshly
+    // mounted TextInput has finished layout, so the select-all frequently
+    // doesn't take and the user has to delete the old value by hand.
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [editing]);
 
   const commitDraft = () => {
     const parsed = Number(draft);
@@ -50,6 +61,7 @@ export function Stepper({
         </Pressable>
         {editing ? (
           <TextInput
+            ref={inputRef}
             style={styles.stepperInput}
             value={draft}
             onChangeText={setDraft}
@@ -57,7 +69,6 @@ export function Stepper({
             onSubmitEditing={commitDraft}
             keyboardType="decimal-pad"
             selectTextOnFocus
-            autoFocus
           />
         ) : (
           <Pressable
