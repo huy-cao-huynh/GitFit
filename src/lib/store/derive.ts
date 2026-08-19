@@ -21,6 +21,7 @@ import type {
   Routine,
   RoutineExercise,
   Session,
+  SessionExercise,
   SetLog,
   StepsEntry,
   UnitSystem,
@@ -334,6 +335,29 @@ export function unscheduledCompletedWorkouts(
       calories: session.calories ?? estimateCardioCalories(session.activityType, session.minutes),
     }));
   return [...strength, ...cardio];
+}
+
+export type WorkoutHistoryEntry =
+  | { type: 'strength'; session: Session }
+  | { type: 'cardio'; session: CardioSession };
+
+/**
+ * Strength + cardio sessions from the last `days` days, newest first. Each
+ * source array is already fetched newest-first, but interleaving two
+ * separately-sorted arrays by date still needs its own sort. Kept as tagged
+ * original objects (not flattened, unlike `unscheduledCompletedWorkouts`)
+ * since row rendering (`CardioRow`, history detail links) needs the full
+ * session shape.
+ */
+export function recentWorkoutHistory(sessions: Session[], cardioSessions: CardioSession[], days: number): WorkoutHistoryEntry[] {
+  const cutoff = shiftDateKey(todayKey(), -days);
+  const strength: WorkoutHistoryEntry[] = sessions
+    .filter((session) => session.date >= cutoff)
+    .map((session) => ({ type: 'strength', session }));
+  const cardio: WorkoutHistoryEntry[] = cardioSessions
+    .filter((session) => session.date >= cutoff)
+    .map((session) => ({ type: 'cardio', session }));
+  return [...strength, ...cardio].sort((a, b) => b.session.date.localeCompare(a.session.date));
 }
 
 export function calendarWeekDays(
@@ -812,6 +836,7 @@ export function lastExercisePerformance(
 }
 
 /** Best-ever working-set weight for an exercise, with the reps it was hit for. */
+/** Weight first, reps as the tiebreaker at equal weight — matches `beatsRecord`'s comparison order. */
 export function exercisePR(
   sessions: Session[],
   exerciseName: string,
@@ -823,13 +848,45 @@ export function exercisePR(
       if (exercise.name.trim().toLowerCase() !== target) continue;
       for (const set of exercise.sets) {
         if (set.isWarmup || set.skipped || !set.weight) continue;
-        if (!best || set.weight > best.weight) {
+        if (beatsRecord(set.weight, set.reps, best)) {
           best = { weight: set.weight, reps: set.reps, date: session.date };
         }
       }
     }
   }
   return best;
+}
+
+/**
+ * Best working set for an exercise among the sets logged *so far in the
+ * current session* — the half of the record `exercisePR` can't see, since the
+ * in-progress session isn't in the store until it's saved.
+ *
+ * Without folding this in, a PR on set 1 leaves the stored record stale for
+ * sets 2..n, so an identical set still "beats" it and re-fires every PR
+ * affordance. Same filter as `exercisePR`: working sets with a real weight.
+ */
+export function sessionBestSet(
+  logged: SessionExercise[],
+  exerciseName: string,
+): { weight: number; reps?: number } | null {
+  const target = exerciseName.trim().toLowerCase();
+  let best: { weight: number; reps?: number } | null = null;
+  for (const exercise of logged) {
+    if (exercise.name.trim().toLowerCase() !== target) continue;
+    for (const set of exercise.sets) {
+      if (set.isWarmup || set.skipped || !set.weight) continue;
+      if (beatsRecord(set.weight, set.reps, best)) best = { weight: set.weight, reps: set.reps };
+    }
+  }
+  return best;
+}
+
+/** Weight-primary, reps-secondary PR comparison: a heavier weight always wins; at equal weight, more reps wins. */
+export function beatsRecord(weight: number, reps: number | undefined, prior: { weight: number; reps?: number } | null): boolean {
+  if (!prior) return true;
+  if (weight > prior.weight) return true;
+  return weight === prior.weight && (reps ?? 0) > (prior.reps ?? 0);
 }
 
 /** Most recent cardio session logged against this routine. Relies on the caller's `cardioSessions` being sorted most-recent-first, same contract as `lastExercisePerformance`. */
@@ -896,19 +953,31 @@ export function scaleMacros(macros: Macros, factor: number): Macros {
   };
 }
 
-/** A day's food logs grouped by meal, plus summed macro totals. */
+/** Condensed macro line for a summary row, e.g. "24p · 30c · 8f". */
+export function macroSummary(macros: Macros): string {
+  return `${Math.round(macros.proteinG)}p · ${Math.round(macros.carbsG)}c · ${Math.round(macros.fatG)}f`;
+}
+
+/** A day's food logs grouped by meal, plus summed macro totals for the day and per meal. */
 export function nutritionForDate(
   foodLogs: FoodLogEntry[],
   date: string,
-): { totals: Macros; byMeal: Record<MealType, FoodLogEntry[]> } {
+): { totals: Macros; byMeal: Record<MealType, FoodLogEntry[]>; mealTotals: Record<MealType, Macros> } {
   const byMeal: Record<MealType, FoodLogEntry[]> = { breakfast: [], lunch: [], dinner: [], snack: [] };
+  const mealTotals: Record<MealType, Macros> = {
+    breakfast: EMPTY_MACROS,
+    lunch: EMPTY_MACROS,
+    dinner: EMPTY_MACROS,
+    snack: EMPTY_MACROS,
+  };
   let totals = EMPTY_MACROS;
   for (const entry of foodLogs) {
     if (entry.date !== date) continue;
     byMeal[entry.meal].push(entry);
+    mealTotals[entry.meal] = addMacros(mealTotals[entry.meal], entry);
     totals = addMacros(totals, entry);
   }
-  return { totals, byMeal };
+  return { totals, byMeal, mealTotals };
 }
 
 /** A distinct previously-logged food, normalized back to per-100g so it can feed the same amount math as a fresh search result. */
@@ -953,14 +1022,22 @@ export function recentFoods(foodLogs: FoodLogEntry[], limit = 6): RecentFood[] {
   return out;
 }
 
-/** Whole-recipe macro totals (sum of ingredients). */
-export function recipeTotals(recipe: Recipe): Macros {
-  return recipe.ingredients.reduce<Macros>((sum, ingredient) => addMacros(sum, ingredient), EMPTY_MACROS);
+/**
+ * Macros for one serving of a recipe. In `macros` mode the stored numbers
+ * already describe one serving (they're copied off a label); in `ingredients`
+ * mode the itemised total is divided by the serving count.
+ */
+export function recipePerServing(recipe: Recipe): Macros {
+  if (recipe.entryMode === 'macros') return recipe.perServing ?? EMPTY_MACROS;
+  return scaleMacros(recipeTotals(recipe), 1 / Math.max(1, recipe.servings));
 }
 
-/** Macros for one serving of a recipe. */
-export function recipePerServing(recipe: Recipe): Macros {
-  return scaleMacros(recipeTotals(recipe), 1 / Math.max(1, recipe.servings));
+/** Whole-recipe macro totals — the sum of ingredients, or one serving scaled up. */
+export function recipeTotals(recipe: Recipe): Macros {
+  if (recipe.entryMode === 'macros') {
+    return scaleMacros(recipe.perServing ?? EMPTY_MACROS, Math.max(1, recipe.servings));
+  }
+  return recipe.ingredients.reduce<Macros>((sum, ingredient) => addMacros(sum, ingredient), EMPTY_MACROS);
 }
 
 /** Date key shifted by whole days (negative = past). */

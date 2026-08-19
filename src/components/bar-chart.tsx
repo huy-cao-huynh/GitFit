@@ -6,8 +6,6 @@ import { buildTicks, defaultTickFormat } from '@/lib/chart-ticks';
 export interface BarChartBar {
   label: string;
   value: number;
-  /** The "current" bucket (today / this month) — rendered at full opacity, rest are muted. */
-  highlighted?: boolean;
 }
 
 interface BarChartProps {
@@ -16,14 +14,27 @@ interface BarChartProps {
   height?: number;
   color: string;
   yFormatter?: (value: number) => string;
+  /** Formats the callout above a selected bar; defaults to `yFormatter`. */
+  calloutFormatter?: (value: number) => string;
+  selectedIndex?: number | null;
+  onSelectBar?: (index: number) => void;
 }
 
-const PADDING = { top: 10, right: 2, bottom: 18, left: 34 };
+const PADDING = { top: 26, right: 2, bottom: 18, left: 34 };
 const BAR_GAP = 4;
 const BAR_RADIUS = 3;
 
-/** Apple-Health-style vertical bar chart — one highlighted bar (today/current period), rest muted, with a y-axis so the bar heights are actually readable. */
-export function BarChart({ bars, width, height = 140, color, yFormatter = defaultTickFormat }: BarChartProps) {
+/** Apple-Health-style vertical bar chart — every bar stays the same color; tapping one draws a line up to a callout bubble showing its value. */
+export function BarChart({
+  bars,
+  width,
+  height = 140,
+  color,
+  yFormatter = defaultTickFormat,
+  calloutFormatter,
+  selectedIndex = null,
+  onSelectBar,
+}: BarChartProps) {
   if (bars.length === 0 || width <= PADDING.left + PADDING.right) return null;
 
   const plotWidth = width - PADDING.left - PADDING.right;
@@ -35,7 +46,7 @@ export function BarChart({ bars, width, height = 140, color, yFormatter = defaul
   const domainMax = Math.max(maxValue * 1.15, ticks[ticks.length - 1]);
   const barWidth = Math.max(2, (plotWidth - BAR_GAP * (bars.length - 1)) / bars.length);
   const radius = Math.min(BAR_RADIUS, barWidth / 2);
-  const anyHighlighted = bars.some((bar) => bar.highlighted);
+  const formatCallout = calloutFormatter ?? yFormatter;
   const yFor = (value: number) => PADDING.top + plotHeight - (value / domainMax) * plotHeight;
 
   return (
@@ -67,19 +78,7 @@ export function BarChart({ bars, width, height = 140, color, yFormatter = defaul
         const barHeight = Math.max(2, (bar.value / domainMax) * plotHeight);
         const x = PADDING.left + index * (barWidth + BAR_GAP);
         const y = PADDING.top + plotHeight - barHeight;
-        return (
-          <Rect
-            key={index}
-            x={x}
-            y={y}
-            width={barWidth}
-            height={barHeight}
-            rx={radius}
-            ry={radius}
-            fill={color}
-            opacity={!anyHighlighted || bar.highlighted ? 1 : 0.35}
-          />
-        );
+        return <Rect key={index} x={x} y={y} width={barWidth} height={barHeight} rx={radius} ry={radius} fill={color} />;
       })}
       {bars.map(
         (bar, index) =>
@@ -96,6 +95,54 @@ export function BarChart({ bars, width, height = 140, color, yFormatter = defaul
             </SvgText>
           ),
       )}
+      {selectedIndex !== null &&
+        bars[selectedIndex] &&
+        (() => {
+          const bar = bars[selectedIndex];
+          const barHeight = Math.max(2, (bar.value / domainMax) * plotHeight);
+          const barTopY = PADDING.top + plotHeight - barHeight;
+          const centerX = PADDING.left + selectedIndex * (barWidth + BAR_GAP) + barWidth / 2;
+          const text = formatCallout(bar.value);
+          const bubbleWidth = Math.max(36, text.length * 7 + 16);
+          const bubbleHeight = 20;
+          const bubbleY = 2;
+          const bubbleX = clampBubbleX(centerX, bubbleWidth, width);
+          const lineTopY = bubbleY + bubbleHeight + 4;
+          return (
+            <>
+              <Line x1={centerX} y1={lineTopY} x2={centerX} y2={barTopY} stroke={Colors.textSecondary} strokeWidth={1} />
+              <Rect x={bubbleX} y={bubbleY} width={bubbleWidth} height={bubbleHeight} rx={bubbleHeight / 2} ry={bubbleHeight / 2} fill={color} />
+              <SvgText
+                x={bubbleX + bubbleWidth / 2}
+                y={bubbleY + bubbleHeight / 2 + 4}
+                fontSize={11}
+                fontFamily={Fonts.displayBold}
+                fill={Colors.onPrimary}
+                textAnchor="middle">
+                {text}
+              </SvgText>
+            </>
+          );
+        })()}
+      {/* Invisible full-height touch targets — wider than the visible bar so thin/near-zero bars stay tappable. */}
+      {onSelectBar &&
+        bars.map((_, index) => (
+          <Rect
+            key={`hit-${index}`}
+            x={PADDING.left + index * (barWidth + BAR_GAP)}
+            y={PADDING.top}
+            width={barWidth}
+            height={plotHeight}
+            fill="transparent"
+            onPress={() => onSelectBar(index)}
+          />
+        ))}
     </Svg>
   );
+}
+
+/** Keeps the callout bubble from clipping past the chart's left/right edges. */
+function clampBubbleX(centerX: number, bubbleWidth: number, chartWidth: number): number {
+  const margin = 2;
+  return Math.min(Math.max(centerX - bubbleWidth / 2, margin), chartWidth - bubbleWidth - margin);
 }

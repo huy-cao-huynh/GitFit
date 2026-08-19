@@ -1,11 +1,13 @@
+import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { MEAL_LABELS, MEAL_ORDER, scaleMacros } from '@/lib/store/derive';
 import type { MealType } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
@@ -49,6 +51,7 @@ export default function FoodEntryScreen() {
   const canSave = entry.grams === undefined || grams > 0;
 
   const save = () => {
+    haptics.impact();
     updateFoodLog({
       ...entry,
       meal,
@@ -58,9 +61,19 @@ export default function FoodEntryScreen() {
     router.back();
   };
 
-  const remove = () => {
-    deleteFoodLog(entry.id);
-    router.back();
+  const confirmDelete = () => {
+    Alert.alert('Delete entry?', 'This removes it from your log for good.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          haptics.notification(Haptics.NotificationFeedbackType.Warning);
+          deleteFoodLog(entry.id);
+          router.back();
+        },
+      },
+    ]);
   };
 
   return (
@@ -132,7 +145,7 @@ export default function FoodEntryScreen() {
           </ThemedText>
         </Pressable>
 
-        <Pressable style={styles.deleteButton} onPress={remove}>
+        <Pressable style={styles.deleteButton} onPress={confirmDelete}>
           <ThemedText type="smallBold" themeColor="danger">
             Delete Entry
           </ThemedText>

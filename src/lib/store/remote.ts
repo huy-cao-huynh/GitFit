@@ -27,6 +27,7 @@ import type {
   NutritionGoals,
   Preferences,
   Recipe,
+  RecipeEntryMode,
   RecipeIngredient,
   Routine,
   RoutineExercise,
@@ -64,6 +65,8 @@ interface RoutineExerciseRow {
   last_reps: number | null;
   last_weight: number | null;
   last_duration_sec: number | null;
+  primary_muscles: string[] | null;
+  secondary_muscles: string[] | null;
   routine_exercise_sets: RoutineExerciseSetRow[];
 }
 
@@ -97,6 +100,8 @@ interface SessionExerciseRow {
   position: number;
   exercise_id: string;
   name: string;
+  primary_muscles: string[] | null;
+  secondary_muscles: string[] | null;
   session_sets: SessionSetRow[];
 }
 
@@ -201,6 +206,12 @@ interface RecipeRow {
   id: string;
   name: string;
   servings: number;
+  /** Migration 0011 columns — optional so a project without it still hydrates. */
+  entry_mode?: string | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  carbs_g?: number | null;
+  fat_g?: number | null;
   recipe_ingredients: RecipeIngredientRow[];
 }
 
@@ -238,6 +249,8 @@ function mapRoutineExercise(row: RoutineExerciseRow): RoutineExercise {
     kind: row.kind,
     sets: byPosition(row.routine_exercise_sets).map(mapRoutineSet),
     restSec: row.rest_sec ?? undefined,
+    primaryMuscles: row.primary_muscles ?? undefined,
+    secondaryMuscles: row.secondary_muscles ?? undefined,
     lastTime: hasLastTime
       ? {
           reps: row.last_reps ?? undefined,
@@ -284,6 +297,8 @@ function mapSession(row: SessionRow): Session {
     exercises: byPosition(row.session_exercises).map((exercise) => ({
       exerciseId: exercise.exercise_id,
       name: exercise.name,
+      primaryMuscles: exercise.primary_muscles ?? undefined,
+      secondaryMuscles: exercise.secondary_muscles ?? undefined,
       sets: byPosition(exercise.session_sets).map(mapSetLog),
     })),
   };
@@ -364,10 +379,24 @@ function mapFoodLog(row: FoodLogRow): FoodLogEntry {
 }
 
 function mapRecipe(row: RecipeRow): Recipe {
+  // Defaults to ingredient mode when migration 0011 hasn't been applied, so an
+  // older project degrades to the previous behaviour rather than failing —
+  // same approach as mapGoals for pre-0006 rows.
+  const entryMode: RecipeEntryMode = row.entry_mode === 'macros' ? 'macros' : 'ingredients';
   return {
     id: row.id,
     name: row.name,
     servings: row.servings,
+    entryMode,
+    perServing:
+      entryMode === 'macros'
+        ? {
+            calories: row.calories ?? 0,
+            proteinG: row.protein_g ?? 0,
+            carbsG: row.carbs_g ?? 0,
+            fatG: row.fat_g ?? 0,
+          }
+        : undefined,
     ingredients: byPosition(row.recipe_ingredients).map((ingredient) => ({
       id: ingredient.id,
       name: ingredient.name,
@@ -557,6 +586,8 @@ function routineExerciseToRow(routineId: string, exercise: RoutineExercise, posi
     last_reps: exercise.lastTime?.reps ?? null,
     last_weight: exercise.lastTime?.weight ?? null,
     last_duration_sec: exercise.lastTime?.durationSec ?? null,
+    primary_muscles: exercise.primaryMuscles ?? null,
+    secondary_muscles: exercise.secondaryMuscles ?? null,
   };
 }
 
@@ -631,6 +662,8 @@ export async function insertSession(session: Session): Promise<void> {
     position: index,
     exercise_id: exercise.exerciseId,
     name: exercise.name,
+    primary_muscles: exercise.primaryMuscles ?? null,
+    secondary_muscles: exercise.secondaryMuscles ?? null,
   }));
   if (exerciseRows.length === 0) return;
   const { error: exerciseError } = await supabase.from('session_exercises').insert(exerciseRows);
@@ -819,7 +852,8 @@ function recipeIngredientToRow(recipeId: string, ingredient: RecipeIngredient, p
 }
 
 async function insertRecipeIngredients(recipe: Recipe): Promise<void> {
-  if (recipe.ingredients.length === 0) return;
+  // Macros mode has nothing to itemise — the label numbers live on the recipe row.
+  if (recipe.entryMode === 'macros' || recipe.ingredients.length === 0) return;
   const rows = recipe.ingredients.map((ingredient, index) =>
     recipeIngredientToRow(recipe.id, ingredient, index),
   );
@@ -827,10 +861,26 @@ async function insertRecipeIngredients(recipe: Recipe): Promise<void> {
   throwIfError(error);
 }
 
+/** The 0011 columns. Macros are per serving; ingredient-mode rows leave them at 0. */
+function recipeMacroColumns(recipe: Recipe) {
+  const perServing = recipe.entryMode === 'macros' ? recipe.perServing : undefined;
+  return {
+    entry_mode: recipe.entryMode,
+    calories: perServing?.calories ?? 0,
+    protein_g: perServing?.proteinG ?? 0,
+    carbs_g: perServing?.carbsG ?? 0,
+    fat_g: perServing?.fatG ?? 0,
+  };
+}
+
 export async function insertRecipe(recipe: Recipe, position: number): Promise<void> {
-  const { error } = await supabase
-    .from('recipes')
-    .insert({ id: recipe.id, name: recipe.name, servings: recipe.servings, position });
+  const { error } = await supabase.from('recipes').insert({
+    id: recipe.id,
+    name: recipe.name,
+    servings: recipe.servings,
+    position,
+    ...recipeMacroColumns(recipe),
+  });
   throwIfError(error);
   await insertRecipeIngredients(recipe);
 }
@@ -838,7 +888,7 @@ export async function insertRecipe(recipe: Recipe, position: number): Promise<vo
 export async function updateRecipe(recipe: Recipe): Promise<void> {
   const { error } = await supabase
     .from('recipes')
-    .update({ name: recipe.name, servings: recipe.servings })
+    .update({ name: recipe.name, servings: recipe.servings, ...recipeMacroColumns(recipe) })
     .eq('id', recipe.id);
   throwIfError(error);
   // Replace strategy, matching updateRoutine: ingredients are few.

@@ -9,14 +9,14 @@ import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { TodayWorkoutCard } from '@/components/today-workout-card';
-import { WaterBottle } from '@/components/water-bottle';
+import { WaterGoalCard } from '@/components/water-goal-card';
 import { WeighInCard } from '@/components/weigh-in-card';
 import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { haptics } from '@/lib/haptics';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { dashboardMetrics, scheduledRoutineTasks, todayKey, todayWaterOunces, weekdayForDate } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import { fromDisplayVolume, fromDisplayWeight, toDisplayVolume, volumeUnitLabel } from '@/lib/units';
+import { fromDisplayVolume, fromDisplayWeight } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
 import { useStore } from '@/providers/store-provider';
 
@@ -72,6 +72,7 @@ export default function DashboardScreen() {
   const dailyWaterTarget = waterGoal ? Math.max(1, Math.round(waterGoal.target / 7)) : 0;
 
   const addWater = (displayAmount: number) => {
+    haptics.impact();
     addWaterEntry({ id: makeId(), date: today, ounces: Math.round(fromDisplayVolume(displayAmount, unitSystem)) });
   };
 
@@ -117,25 +118,13 @@ export default function DashboardScreen() {
 
               <View style={styles.bento}>
                 {waterGoal ? (
-                  <View style={styles.waterCard}>
-                    <ThemedText type="caption" themeColor="textSecondary">
-                      WATER
-                    </ThemedText>
-                    <WaterBottle progress={dailyWaterTarget > 0 ? todayWater / dailyWaterTarget : 0} size={44} />
-                    <ThemedText type="statInline">
-                      {toDisplayVolume(todayWater, unitSystem)}
-                      <ThemedText type="small" themeColor="textSecondary">
-                        /{toDisplayVolume(dailyWaterTarget, unitSystem)} {volumeUnitLabel(unitSystem)}
-                      </ThemedText>
-                    </ThemedText>
-                    <Pressable
-                      style={({ pressed }) => [styles.waterAdd, pressed && styles.waterAddPressed]}
-                      onPress={() => addWater(quickAdd)}>
-                      <ThemedText type="caption" themeColor="onPrimary">
-                        +{quickAdd} {volumeUnitLabel(unitSystem)}
-                      </ThemedText>
-                    </Pressable>
-                  </View>
+                  <WaterGoalCard
+                    current={todayWater}
+                    target={dailyWaterTarget}
+                    unitSystem={unitSystem}
+                    quickAddDisplay={quickAdd}
+                    onAdd={() => addWater(quickAdd)}
+                  />
                 ) : null}
 
                 <DailyGoalsCard
@@ -221,22 +210,6 @@ const styles = StyleSheet.create({
     // height gives both children something to stretch to; a long goal list
     // still scrolls inside its card rather than stretching the row.
     height: BENTO_HEIGHT,
-  },
-  waterCard: {
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderRadius: Radius.lg,
-    backgroundColor: colors.surface,
-    padding: Spacing.three,
-  },
-  waterAdd: {
-    borderRadius: Radius.sm,
-    backgroundColor: colors.primary,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
-  },
-  waterAddPressed: {
-    backgroundColor: colors.primaryDark,
   },
   newWorkoutButton: {
     flexDirection: 'row',

@@ -7,7 +7,7 @@ import { Chevron } from '@/components/chevron';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
-import { recipePerServing } from '@/lib/store/derive';
+import { macroSummary, recipePerServing } from '@/lib/store/derive';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -52,8 +52,10 @@ export default function RecipesScreen() {
                 <View style={styles.recipeText}>
                   <ThemedText type="smallBold">{item.name}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    {item.ingredients.length} ingredients · {Math.round(perServing.calories)} cal /
-                    serving · {item.servings} servings
+                    {/* A nutrition-only recipe has no ingredients or serving count to report. */}
+                    {item.entryMode === 'macros'
+                      ? `${Math.round(perServing.calories)} cal / serving · ${macroSummary(perServing)}`
+                      : `${item.ingredients.length} ingredients · ${Math.round(perServing.calories)} cal / serving · ${item.servings} servings`}
                   </ThemedText>
                 </View>
                 <Chevron color={colors.textSecondary} />

@@ -1,6 +1,6 @@
 -- Nutrition (Phase 2): food logging by meal, personal recipe book, and daily
 -- calorie/macro targets. Nutrients are snapshotted onto each row at log time
--- (per-100g source data lives only in the Open Food Facts lookup), so history
+-- (per-100g source data lives only in the USDA FoodData Central lookup), so history
 -- never shifts when a source food changes.
 --
 -- Apply by pasting this whole file into the Supabase dashboard SQL Editor and

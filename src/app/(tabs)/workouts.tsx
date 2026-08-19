@@ -6,6 +6,7 @@ import Svg, { Path } from 'react-native-svg';
 import { SymbolView } from 'expo-symbols';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { CardioRow } from '@/components/cardio-row';
 import { Chevron } from '@/components/chevron';
 import { MuscleCoverageBar } from '@/components/muscle-coverage-bar';
 import { ScreenBackground } from '@/components/screen-background';
@@ -14,22 +15,24 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, Motion, Radius, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS } from '@/lib/activity-icons';
-import { muscleCoverageThisWeek, routineScheduleLabel } from '@/lib/store/derive';
-import type { Routine, WorkoutCategory } from '@/lib/store/types';
+import { muscleCoverageThisWeek, recentWorkoutHistory, routineScheduleLabel } from '@/lib/store/derive';
+import type { Routine, Session, WorkoutCategory } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 
 const CATEGORY_LABELS: Record<WorkoutCategory, string> = { strength: 'Strength', cardio: 'Cardio' };
+const HISTORY_DAYS = 30;
 
 export default function WorkoutsScreen() {
-  const { routines, sessions } = useStore();
+  const { routines, sessions, cardioSessions, preferences } = useStore();
   const [category, setCategory] = useState<WorkoutCategory>('strength');
   const [segmentedWidth, setSegmentedWidth] = useState(0);
   const filtered = routines.filter((routine) => routine.category === category);
   const listRef = useResetScrollOnFocus<FlatList<Routine>>();
   const muscleHit = muscleCoverageThisWeek(sessions);
+  const history = recentWorkoutHistory(sessions, cardioSessions, HISTORY_DAYS);
 
   const segmentWidth = segmentedWidth > 0 ? (segmentedWidth - Spacing.half * 2) / 2 : 0;
   const position = useSharedValue(category === 'strength' ? 0 : 1);
@@ -76,6 +79,7 @@ export default function WorkoutsScreen() {
           data={filtered}
           keyExtractor={(routine) => routine.id}
           contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             <Pressable
               style={styles.createRow}
@@ -93,6 +97,24 @@ export default function WorkoutsScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               Create a {CATEGORY_LABELS[category].toLowerCase()} workout to get started.
             </ThemedText>
+          }
+          ListFooterComponent={
+            history.length > 0 ? (
+              <View style={styles.historySection}>
+                <ThemedText type="label" style={styles.historyLabel}>
+                  Last {HISTORY_DAYS} days
+                </ThemedText>
+                <View style={styles.historyList}>
+                  {history.map((entry) =>
+                    entry.type === 'cardio' ? (
+                      <CardioRow key={entry.session.id} session={entry.session} unitSystem={preferences.unitSystem} />
+                    ) : (
+                      <HistoryRow key={entry.session.id} session={entry.session} />
+                    ),
+                  )}
+                </View>
+              </View>
+            ) : null
           }
         />
       </SafeAreaView>
@@ -143,6 +165,45 @@ function RoutineRow({ routine }: { routine: Routine }) {
       </ThemedView>
     </Pressable>
   );
+}
+
+function HistoryRow({ session }: { session: Session }) {
+  const setCount = session.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
+
+  return (
+    <Pressable onPress={() => router.push({ pathname: '/history/[id]', params: { id: session.id } })}>
+      <ThemedView type="surface" style={styles.historyRow}>
+        <View style={styles.historyThumb}>
+          <SymbolView name="dumbbell" size={20} tintColor={colors.textSecondary} />
+        </View>
+        <View style={styles.historyBody}>
+          <ThemedText type="smallBold" numberOfLines={1}>
+            {session.routineName}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {formatHistoryDate(session.date)}
+          </ThemedText>
+          <View style={styles.historyMetaRow}>
+            <ThemedText type="statInline" themeColor="textSecondary">
+              {session.durationMinutes} min
+            </ThemedText>
+            <ThemedText type="statInline" themeColor="textSecondary">
+              {setCount} sets
+            </ThemedText>
+          </View>
+        </View>
+        <Chevron color={colors.textSecondary} />
+      </ThemedView>
+    </Pressable>
+  );
+}
+
+function formatHistoryDate(iso: string) {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function activityLabel(routine: Routine): string {
@@ -237,5 +298,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  historySection: {
+    marginTop: Spacing.four,
+    gap: Spacing.two,
+  },
+  historyLabel: {
+    textTransform: 'uppercase',
+  },
+  historyList: {
+    gap: Spacing.two,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderRadius: Radius.lg,
+    padding: Spacing.two,
+    paddingRight: Spacing.three,
+  },
+  historyThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyBody: {
+    flex: 1,
+    gap: Spacing.half,
+  },
+  historyMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: Spacing.three,
   },
 });

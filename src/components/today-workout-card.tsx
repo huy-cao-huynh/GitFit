@@ -6,12 +6,12 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import Svg, { Path } from 'react-native-svg';
 
 import { Chevron } from '@/components/chevron';
-import { MuscleChipRow } from '@/components/muscle-chip-row';
+import { MuscleDiagramSheet } from '@/components/muscle-diagram-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Motion, Radius, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS } from '@/lib/activity-icons';
 import { haptics } from '@/lib/haptics';
-import { muscleChipsFor } from '@/lib/muscles';
+import { mergeMuscleLayers } from '@/lib/muscles';
 import { estimateRoutineCalories, type ScheduledRoutineTask } from '@/lib/store/derive';
 import type { Routine, RoutineExercise } from '@/lib/store/types';
 import { formatDuration } from '@/lib/format';
@@ -40,6 +40,7 @@ function WorkoutCard({ task }: { task: ScheduledRoutineTask }) {
   const { routine, completed } = task;
   const isCardio = routine.category === 'cardio';
   const [expanded, setExpanded] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // The chevron glyph points right at 0deg, so collapsed is 90 (down) and
   // expanded is -90 (up).
@@ -63,16 +64,20 @@ function WorkoutCard({ task }: { task: ScheduledRoutineTask }) {
     );
   };
 
-  const muscles = muscleChipsFor(routine);
+  const muscleLayers = mergeMuscleLayers(routine.exercises);
 
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
+        <View style={styles.cardIcon}>
+          <SymbolView
+            name={isCardio ? ACTIVITY_ICONS[routine.activityType ?? 'other'] : 'dumbbell'}
+            size={22}
+            tintColor={colors.primaryLight}
+          />
+        </View>
         <View style={styles.flex}>
           <View style={styles.titleRow}>
-            {isCardio ? (
-              <SymbolView name={ACTIVITY_ICONS[routine.activityType ?? 'other']} size={14} tintColor={colors.primary} />
-            ) : null}
             <ThemedText type="heading" numberOfLines={2} style={styles.flex}>
               {routine.name}
             </ThemedText>
@@ -94,7 +99,7 @@ function WorkoutCard({ task }: { task: ScheduledRoutineTask }) {
             </View>
           ) : null}
           {completed ? (
-            <View style={styles.metaRow}>
+            <View style={styles.completedRow}>
               <SymbolView name="checkmark.circle.fill" size={13} tintColor={colors.primary} />
               <ThemedText type="small" themeColor="primary">
                 Completed today
@@ -116,7 +121,19 @@ function WorkoutCard({ task }: { task: ScheduledRoutineTask }) {
         </Pressable>
       </View>
 
-      <MuscleChipRow muscles={muscles} />
+      {(muscleLayers.primary.length > 0 || muscleLayers.secondary.length > 0) && (
+        <Pressable hitSlop={6} onPress={() => setSheetOpen(true)}>
+          <ThemedText type="small" style={{ color: colors.primaryLight }}>
+            View muscle groups
+          </ThemedText>
+        </Pressable>
+      )}
+      <MuscleDiagramSheet
+        visible={sheetOpen}
+        primary={muscleLayers.primary}
+        secondary={muscleLayers.secondary}
+        onClose={() => setSheetOpen(false)}
+      />
 
       {isCardio ? (
         <ThemedText type="small" themeColor="textSecondary">
@@ -216,7 +233,15 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.three,
+  },
+  cardIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: Radius.sm,
+    backgroundColor: colors.primaryTint,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   titleRow: {
     flexDirection: 'row',
@@ -233,6 +258,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one + Spacing.half,
+  },
+  completedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one + Spacing.half,
+    marginTop: Spacing.two,
   },
   playButton: {
     width: 44,

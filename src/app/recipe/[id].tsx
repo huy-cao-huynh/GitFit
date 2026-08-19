@@ -1,3 +1,4 @@
+import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
@@ -18,11 +19,12 @@ import { Stepper } from '@/components/stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { searchFoods } from '@/lib/nutrition/usda-food-data-central';
 import { macrosForGrams, type FoodSearchResult } from '@/lib/nutrition/units';
-import { recipeTotals, scaleMacros } from '@/lib/store/derive';
+import { macroSummary, recipeTotals, scaleMacros } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import type { RecipeIngredient } from '@/lib/store/types';
+import type { Macros, Recipe, RecipeEntryMode, RecipeIngredient } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
 const SEARCH_DEBOUNCE_MS = 400;
@@ -68,6 +70,31 @@ function fromDraft(draft: IngredientDraft): RecipeIngredient {
   };
 }
 
+/** The four numbers off a nutrition label, as text, for `macros` mode. */
+type MacroDraft = Record<keyof Macros, string>;
+
+function emptyMacroDraft(): MacroDraft {
+  return { calories: '', proteinG: '', carbsG: '', fatG: '' };
+}
+
+function toMacroDraft(macros: Macros): MacroDraft {
+  return {
+    calories: String(macros.calories),
+    proteinG: String(macros.proteinG),
+    carbsG: String(macros.carbsG),
+    fatG: String(macros.fatG),
+  };
+}
+
+function fromMacroDraft(draft: MacroDraft): Macros {
+  return {
+    calories: Number(draft.calories) || 0,
+    proteinG: Number(draft.proteinG) || 0,
+    carbsG: Number(draft.carbsG) || 0,
+    fatG: Number(draft.fatG) || 0,
+  };
+}
+
 export default function RecipeEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { recipes, addRecipe, updateRecipe, deleteRecipe } = useStore();
@@ -76,15 +103,29 @@ export default function RecipeEditorScreen() {
 
   const [name, setName] = useState(existing?.name ?? '');
   const [servings, setServings] = useState(existing?.servings ?? 1);
+  const [entryMode, setEntryMode] = useState<RecipeEntryMode>(existing?.entryMode ?? 'ingredients');
   const [ingredients, setIngredients] = useState<IngredientDraft[]>(
-    existing ? existing.ingredients.map(toDraft) : [emptyDraft()],
+    existing && existing.ingredients.length > 0 ? existing.ingredients.map(toDraft) : [emptyDraft()],
+  );
+  // Kept independently of `ingredients` so flipping the mode back and forth
+  // never discards work the user already typed on the other side.
+  const [labelDraft, setLabelDraft] = useState<MacroDraft>(
+    existing?.perServing ? toMacroDraft(existing.perServing) : emptyMacroDraft(),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  const isMacroMode = entryMode === 'macros';
   const parsed = ingredients.map(fromDraft).filter((ingredient) => ingredient.name.length > 0);
-  const totals = recipeTotals({ id: '', name: '', servings: 1, ingredients: parsed });
-  const perServing = scaleMacros(totals, 1 / Math.max(1, servings));
-  const canSave = name.trim().length > 0 && parsed.length > 0;
+  const labelMacros = fromMacroDraft(labelDraft);
+  // One serving either way, so the summary card reads the same in both modes.
+  const perServing = isMacroMode
+    ? labelMacros
+    : scaleMacros(
+        recipeTotals({ id: '', name: '', servings: 1, entryMode: 'ingredients', ingredients: parsed }),
+        1 / Math.max(1, servings),
+      );
+  const canSave =
+    name.trim().length > 0 && (isMacroMode ? labelMacros.calories > 0 : parsed.length > 0);
 
   const updateIngredient = (draftId: string, patch: Partial<IngredientDraft>) => {
     setIngredients((current) =>
@@ -93,7 +134,17 @@ export default function RecipeEditorScreen() {
   };
 
   const save = () => {
-    const recipe = { id: isNew ? makeId() : id!, name: name.trim(), servings, ingredients: parsed };
+    haptics.notification(Haptics.NotificationFeedbackType.Success);
+    const recipe: Recipe = {
+      id: isNew ? makeId() : id!,
+      name: name.trim(),
+      // Macros mode describes a single serving, so the count is fixed at 1 —
+      // quantity is chosen when logging instead.
+      servings: isMacroMode ? 1 : servings,
+      entryMode,
+      perServing: isMacroMode ? labelMacros : undefined,
+      ingredients: isMacroMode ? [] : parsed,
+    };
     if (isNew) addRecipe(recipe);
     else updateRecipe(recipe);
     router.back();
@@ -106,6 +157,7 @@ export default function RecipeEditorScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: () => {
+          haptics.notification(Haptics.NotificationFeedbackType.Warning);
           deleteRecipe(id!);
           router.back();
         },
@@ -145,24 +197,87 @@ export default function RecipeEditorScreen() {
               onChangeText={setName}
             />
 
+            <View style={styles.modeToggle}>
+              {(
+                [
+                  ['ingredients', 'Ingredients'],
+                  ['macros', 'Nutrition only'],
+                ] as const
+              ).map(([mode, label]) => {
+                const active = entryMode === mode;
+                return (
+                  <Pressable
+                    key={mode}
+                    style={[styles.modeButton, active && styles.modeButtonActive]}
+                    onPress={() => {
+                      haptics.selection();
+                      setEntryMode(mode);
+                    }}>
+                    <ThemedText type="small" themeColor={active ? 'onPrimary' : 'textSecondary'}>
+                      {label}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             <ThemedView type="surface" style={styles.card}>
-              <View style={styles.servingsRow}>
-                <Stepper label="Servings" value={servings} min={1} max={50} step={1} onChange={setServings} />
+              {isMacroMode ? (
                 <View style={styles.perServing}>
                   <ThemedText type="smallBold">{Math.round(perServing.calories)} cal</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    {Math.round(perServing.proteinG)}p / {Math.round(perServing.carbsG)}c /{' '}
-                    {Math.round(perServing.fatG)}f per serving
+                    {macroSummary(perServing)} per serving
                   </ThemedText>
                 </View>
-              </View>
+              ) : (
+                <View style={styles.servingsRow}>
+                  <Stepper label="Servings" value={servings} min={1} max={50} step={1} onChange={setServings} />
+                  <View style={styles.perServing}>
+                    <ThemedText type="smallBold">{Math.round(perServing.calories)} cal</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {macroSummary(perServing)} per serving
+                    </ThemedText>
+                  </View>
+                </View>
+              )}
             </ThemedView>
 
             <ThemedText type="label" style={styles.sectionLabel}>
-              INGREDIENTS
+              {isMacroMode ? 'PER SERVING' : 'INGREDIENTS'}
             </ThemedText>
 
-            {ingredients.map((draft) => (
+            {isMacroMode && (
+              <ThemedView type="surface" style={styles.card}>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Copy the numbers for one serving straight off the label. Log more than one serving when
+                  you add it to a meal.
+                </ThemedText>
+                <View style={styles.macroGrid}>
+                  <MacroInput
+                    label="Cal"
+                    value={labelDraft.calories}
+                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, calories: text }))}
+                  />
+                  <MacroInput
+                    label="Protein"
+                    value={labelDraft.proteinG}
+                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, proteinG: text }))}
+                  />
+                  <MacroInput
+                    label="Carbs"
+                    value={labelDraft.carbsG}
+                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, carbsG: text }))}
+                  />
+                  <MacroInput
+                    label="Fat"
+                    value={labelDraft.fatG}
+                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, fatG: text }))}
+                  />
+                </View>
+              </ThemedView>
+            )}
+
+            {!isMacroMode && ingredients.map((draft) => (
               <ThemedView key={draft.id} type="surface" style={styles.card}>
                 <View style={styles.ingredientHeader}>
                   <TextInput
@@ -174,9 +289,10 @@ export default function RecipeEditorScreen() {
                   />
                   <Pressable
                     hitSlop={8}
-                    onPress={() =>
-                      setIngredients((current) => current.filter((candidate) => candidate.id !== draft.id))
-                    }>
+                    onPress={() => {
+                      haptics.selection();
+                      setIngredients((current) => current.filter((candidate) => candidate.id !== draft.id));
+                    }}>
                     <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
                   </Pressable>
                 </View>
@@ -210,7 +326,7 @@ export default function RecipeEditorScreen() {
               </ThemedView>
             ))}
 
-            {pickerOpen ? (
+            {isMacroMode ? null : pickerOpen ? (
               <IngredientPicker
                 onAdd={(draft) => {
                   setIngredients((current) => [...current, draft]);
@@ -222,13 +338,21 @@ export default function RecipeEditorScreen() {
               <View style={styles.addIngredientRow}>
                 <Pressable
                   style={styles.addRow}
-                  onPress={() => setIngredients((current) => [...current, emptyDraft()])}>
+                  onPress={() => {
+                    haptics.selection();
+                    setIngredients((current) => [...current, emptyDraft()]);
+                  }}>
                   <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
                   <ThemedText type="small" style={{ color: colors.primaryLight }}>
                     Add ingredient
                   </ThemedText>
                 </Pressable>
-                <Pressable style={styles.addRow} onPress={() => setPickerOpen(true)}>
+                <Pressable
+                  style={styles.addRow}
+                  onPress={() => {
+                    haptics.selection();
+                    setPickerOpen(true);
+                  }}>
                   <SymbolView name="magnifyingglass.circle.fill" size={20} tintColor={colors.primaryLight} />
                   <ThemedText type="small" style={{ color: colors.primaryLight }}>
                     Search ingredient
@@ -251,7 +375,7 @@ export default function RecipeEditorScreen() {
   );
 }
 
-/** Search Open Food Facts for an ingredient and pick a gram amount, as an alternative to typing macros by hand. */
+/** Search USDA FoodData Central for an ingredient and pick a gram amount, as an alternative to typing macros by hand. */
 function IngredientPicker({
   onAdd,
   onCancel,
@@ -315,7 +439,8 @@ function IngredientPicker({
         <Pressable
           style={[styles.pickerConfirmButton, grams <= 0 && styles.disabledButton]}
           disabled={grams <= 0}
-          onPress={() =>
+          onPress={() => {
+            haptics.selection();
             onAdd({
               id: makeId(),
               name: picked.name,
@@ -324,8 +449,8 @@ function IngredientPicker({
               proteinG: String(macros.proteinG),
               carbsG: String(macros.carbsG),
               fatG: String(macros.fatG),
-            })
-          }>
+            });
+          }}>
           <ThemedText type="smallBold" style={styles.primaryButtonText}>
             Add Ingredient
           </ThemedText>
@@ -445,6 +570,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.three,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+    padding: Spacing.half,
+  },
+  modeButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: Radius.sm,
+    paddingVertical: Spacing.two,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.primary,
   },
   perServing: {
     flex: 1,

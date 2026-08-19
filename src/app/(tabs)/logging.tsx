@@ -18,6 +18,7 @@ import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { BUILTIN_GOAL_PRESETS, type GoalPreset } from '@/lib/store/goal-presets';
 import { METRIC_ICONS } from '@/lib/metric-icons';
 import {
   WEEKDAY_OPTIONS,
@@ -51,23 +52,6 @@ const METRIC_META: Record<GoalMetric, { min: number; max: number; step: number }
   bodyweight: { min: 1, max: 7, step: 1 },
   manual: { min: 1, max: 100, step: 1 },
 };
-
-interface GoalPreset {
-  metric: Exclude<GoalMetric, 'manual'>;
-  label: string;
-  target: number;
-  unit: string;
-}
-
-/** The built-in goals, offered as one-tap re-adds when missing. */
-const BUILTIN_GOAL_PRESETS: GoalPreset[] = [
-  { metric: 'workouts', label: 'Workouts', target: 5, unit: 'workouts' },
-  { metric: 'calories', label: 'Calories Burned', target: 1500, unit: 'cal' },
-  { metric: 'cardio', label: 'Cardio', target: 60, unit: 'min' },
-  { metric: 'water', label: 'Water', target: 448, unit: 'oz' },
-  { metric: 'steps', label: 'Steps', target: 70000, unit: 'steps' },
-  { metric: 'bodyweight', label: 'Weigh In', target: 1, unit: 'weigh-ins' },
-];
 
 export default function LoggingScreen() {
   const {
@@ -106,9 +90,15 @@ export default function LoggingScreen() {
   const calendarDays = calendarWeekDays(routines, sessions, cardioSessions, selectedDateObject);
   const selectedTasks = scheduledRoutineTasks(routines, sessions, cardioSessions, selectedDate);
   const extraCompletedWorkouts = unscheduledCompletedWorkouts(routines, sessions, cardioSessions, selectedDate);
-  const visibleGoals = goals.filter(
-    (goal): goal is GoalDef & { metric: Exclude<GoalMetric, 'manual'> } => goal.metric !== 'manual',
-  );
+  // Fixed display order (matches BUILTIN_GOAL_PRESETS, bodyweight/"Weigh In"
+  // last) rather than array/insertion order, so removing and re-adding a
+  // goal never shuffles the list.
+  const goalMetricOrder = BUILTIN_GOAL_PRESETS.map((preset) => preset.metric);
+  const visibleGoals = goals
+    .filter(
+      (goal): goal is GoalDef & { metric: Exclude<GoalMetric, 'manual'> } => goal.metric !== 'manual',
+    )
+    .sort((a, b) => goalMetricOrder.indexOf(a.metric) - goalMetricOrder.indexOf(b.metric));
   const missingPresets = BUILTIN_GOAL_PRESETS.filter(
     (preset) => !goals.some((goal) => goal.metric === preset.metric),
   );

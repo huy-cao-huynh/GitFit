@@ -23,6 +23,8 @@ export function AnimatedNumber({
   duration = 800,
   grouped = false,
   decimals = 0,
+  from = 0,
+  delay = 0,
   style,
 }: {
   value: number;
@@ -32,25 +34,34 @@ export function AnimatedNumber({
   grouped?: boolean;
   /** Fixed decimal places (e.g. 1 for "1.4"). Counts up in fractional steps too. */
   decimals?: number;
+  /** Value to start the first count from — e.g. the record being beaten. Mount-time only. */
+  from?: number;
+  /** Hold the first count for this long, so it can land on a beat in a longer sequence. */
+  delay?: number;
   style?: StyleProp<TextStyle>;
 }) {
-  const [display, setDisplay] = useState(0);
+  const scale = 10 ** decimals;
+  const initial = Math.round(from * scale);
+  const [display, setDisplay] = useState(initial);
   // What's on screen right now, so an animation interrupted mid-count resumes
   // from where it visually is instead of snapping back. Stored at `decimals`
   // precision (scaled to an integer) so fractional targets count up smoothly.
-  const shown = useRef(0);
-  const scale = 10 ** decimals;
+  const shown = useRef(initial);
+  // Only the first count waits — a later value change should retarget at once.
+  const delayed = useRef(delay);
 
   useEffect(() => {
     const target = Math.round(value * scale);
     const from = shown.current;
     if (from === target) return;
 
-    const start = Date.now();
+    const wait = delayed.current;
+    delayed.current = 0;
+    const start = Date.now() + wait;
     let frame: ReturnType<typeof requestAnimationFrame>;
 
     const tick = () => {
-      const t = Math.min(1, (Date.now() - start) / duration);
+      const t = Math.min(1, Math.max(0, Date.now() - start) / duration);
       // Ease-out cubic, matching the previous withTiming easing.
       const eased = 1 - Math.pow(1 - t, 3);
       const next = Math.round(from + (target - from) * eased);

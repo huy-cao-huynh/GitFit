@@ -22,6 +22,9 @@ export interface RoutineExercise {
   sets: RoutineSet[];
   restSec?: number;
   lastTime: { reps?: number; weight?: number; durationSec?: number } | null;
+  /** Anatome muscle slugs, resolved from the exercise-lookup search or a keyword fallback. */
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
 }
 
 export type WorkoutCategory = 'strength' | 'cardio';
@@ -64,6 +67,9 @@ export interface SessionExercise {
   exerciseId: string;
   name: string;
   sets: SetLog[];
+  /** Snapshotted from the routine exercise at session-save time (routines can change/be deleted later). */
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
 }
 
 /** A completed strength workout, with the sets actually performed. */
@@ -204,10 +210,23 @@ export interface RecipeIngredient extends Macros {
   grams?: number;
 }
 
+/**
+ * How a recipe's macros are authored. `ingredients` itemises and sums;
+ * `macros` takes the numbers straight off a nutrition label, for a branded
+ * item that has nothing to itemise (a specific protein shake, say).
+ */
+export type RecipeEntryMode = 'ingredients' | 'macros';
+
 export interface Recipe {
   id: string;
   name: string;
   servings: number;
+  entryMode: RecipeEntryMode;
+  /**
+   * Authoritative in `macros` mode — one serving's worth, as printed on the
+   * label. Ignored in `ingredients` mode, where `ingredients` is authoritative.
+   */
+  perServing?: Macros;
   ingredients: RecipeIngredient[];
 }
 

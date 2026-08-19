@@ -4,11 +4,26 @@
  * screens use regardless of which API a result came from.
  */
 
+/**
+ * Which half of a food database a result came from. `basic` is the curated,
+ * lab-analyzed generic entries ("Chicken breast, raw"); `branded` is packaged
+ * products. Providers other than USDA draw the same distinction (Nutritionix
+ * calls it common vs branded), which is why it lives in the shared shape.
+ */
+export type FoodTier = 'basic' | 'branded';
+
 export interface FoodSearchResult {
   /** Provider-specific unique id (OFF barcode, USDA fdcId, …). */
   code: string;
   name: string;
   brand?: string;
+  tier: FoodTier;
+  /**
+   * From the provider's most rigorously analyzed dataset (USDA Foundation).
+   * A weaker claim than `tier`: all Foundation foods are basic, but plenty of
+   * basic foods are older SR Legacy records. Used only to rank.
+   */
+  verified?: boolean;
   /** Per 100 g. */
   caloriesPer100g: number;
   proteinPer100g: number;

@@ -12,11 +12,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GitFitLogo } from '@/components/gitfit-logo';
 import { GoogleIcon } from '@/components/google-icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WORDMARK } from '@/constants/brand';
+import { Wordmark } from '@/components/wordmark';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { authErrorMessage } from '@/lib/auth-errors';
@@ -115,11 +114,10 @@ export default function LoginScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             <View style={styles.logoRow}>
-              <GitFitLogo size={64} gradient />
+              {/* Static: AppIntro has just played the reveal, and replaying it
+                  on the screen it dissolves into reads as a stutter. */}
+              <Wordmark size={40} />
             </View>
-            <ThemedText type="subtitle" style={styles.title}>
-              {WORDMARK}
-            </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.title}>
               Sign in to track your workouts
             </ThemedText>

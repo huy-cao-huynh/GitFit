@@ -1,7 +1,8 @@
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
@@ -17,11 +18,13 @@ import {
   DEFAULT_NUTRITION_GOALS,
   MEAL_LABELS,
   MEAL_ORDER,
+  macroSummary,
   nutritionForDate,
   shiftDateKey,
   todayKey,
   todayWaterOunces,
 } from '@/lib/store/derive';
+import { haptics } from '@/lib/haptics';
 import { makeId } from '@/lib/store/id';
 import type { FoodLogEntry, MealType } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
@@ -39,7 +42,7 @@ export default function NutritionScreen() {
   const [date, setDate] = useState(todayKey());
 
   const goals = nutritionGoals ?? DEFAULT_NUTRITION_GOALS;
-  const { totals, byMeal } = nutritionForDate(foodLogs, date);
+  const { totals, byMeal, mealTotals } = useMemo(() => nutritionForDate(foodLogs, date), [foodLogs, date]);
   const remaining = Math.round(goals.calories - totals.calories);
 
   const unitSystem = preferences.unitSystem;
@@ -53,6 +56,22 @@ export default function NutritionScreen() {
 
   const goToSearch = (meal: MealType) =>
     router.push({ pathname: '/food/search', params: { date, meal } });
+
+  // Same confirmation shape as the food/[id] detail screen, so every delete
+  // path in the app asks first.
+  const confirmDelete = (entry: FoodLogEntry) => {
+    Alert.alert('Delete entry?', `Removes ${entry.name} from your log for good.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          haptics.notification(Haptics.NotificationFeedbackType.Warning);
+          deleteFoodLog(entry.id);
+        },
+      },
+    ]);
+  };
 
   const addWater = (displayAmount: number) => {
     let deltaOunces = Math.round(fromDisplayVolume(displayAmount, unitSystem));
@@ -128,16 +147,17 @@ export default function NutritionScreen() {
 
             {MEAL_ORDER.map((meal) => {
               const entries = byMeal[meal];
-              const mealCalories = Math.round(entries.reduce((sum, entry) => sum + entry.calories, 0));
+              const mealMacros = mealTotals[meal];
+              const mealCalories = Math.round(mealMacros.calories);
               return (
                 <View key={meal} style={styles.mealSection}>
                   <View style={styles.mealHeader}>
                     <ThemedText type="label" style={styles.sectionLabel}>
                       {MEAL_LABELS[meal].toUpperCase()}
                     </ThemedText>
-                    {mealCalories > 0 && (
+                    {entries.length > 0 && (
                       <ThemedText type="small" themeColor="textSecondary">
-                        {mealCalories} cal
+                        {mealCalories} cal · {macroSummary(mealMacros)}
                       </ThemedText>
                     )}
                   </View>
@@ -147,7 +167,7 @@ export default function NutritionScreen() {
                         key={entry.id}
                         entry={entry}
                         divider={index > 0}
-                        onDelete={() => deleteFoodLog(entry.id)}
+                        onDelete={() => confirmDelete(entry)}
                       />
                     ))}
                     <Pressable
@@ -227,11 +247,13 @@ function RemainingCalories({ date, remaining }: { date: string; remaining: numbe
   );
 }
 
-/** Brand + serving size only — macro breakdown now lives once per meal, not per item. */
+/** Brand, serving size, then the condensed macro breakdown for this one entry. */
 function servingLabel(entry: FoodLogEntry): string {
-  const parts = [entry.brand, entry.grams !== undefined ? `${Math.round(entry.grams)} g` : undefined].filter(
-    (part): part is string => !!part,
-  );
+  const parts = [
+    entry.brand,
+    entry.grams !== undefined ? `${Math.round(entry.grams)} g` : undefined,
+    macroSummary(entry),
+  ].filter((part): part is string => !!part);
   return parts.join(' · ');
 }
 

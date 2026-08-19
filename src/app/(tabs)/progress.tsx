@@ -19,18 +19,21 @@ import { BarChart, type BarChartBar } from '@/components/bar-chart';
 import { CardioRow } from '@/components/cardio-row';
 import { ContributionGrid } from '@/components/contribution-grid';
 import { LineChart } from '@/components/line-chart';
+import { LogWeightSheet } from '@/components/log-weight-sheet';
 import { RangeToggle } from '@/components/range-toggle';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, ChartColors, Colors, MaxContentWidth, Radius, Spacing, Type } from '@/constants/theme';
-import { exerciseNames, strengthSeries, toDateKey } from '@/lib/store/derive';
+import { haptics } from '@/lib/haptics';
+import { exerciseNames, strengthSeries, toDateKey, todayKey } from '@/lib/store/derive';
 import type { CardioSession, ProgressPoint, Session, UnitSystem } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import {
   distanceUnitLabel,
   formatPace,
+  fromDisplayWeight,
   toDisplayDistance,
   toDisplayPaceSecPerUnit,
   toDisplayWeight,
@@ -59,13 +62,15 @@ const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export default function ProgressScreen() {
-  const { sessions, cardioSessions, bodyweight, preferences } = useStore();
+  const { sessions, cardioSessions, bodyweight, preferences, addBodyweight } = useStore();
   const unitSystem = preferences.unitSystem;
   const [runRange, setRunRange] = useState<TrackingRange>('week');
+  const [selectedRunBar, setSelectedRunBar] = useState<number | null>(null);
   const [clusterRange, setClusterRange] = useState<MetricRange>('month');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
   const [showFunUnit, setShowFunUnit] = useState(true);
+  const [weightSheetOpen, setWeightSheetOpen] = useState(false);
   const scrollRef = useResetScrollOnFocus<ScrollView>();
 
   const latestWeight = bodyweight[bodyweight.length - 1];
@@ -160,7 +165,14 @@ export default function ProgressScreen() {
             TRACKING
           </ThemedText>
 
-          <RangeToggle options={TRACKING_RANGE_OPTIONS} value={runRange} onChange={setRunRange} />
+          <RangeToggle
+            options={TRACKING_RANGE_OPTIONS}
+            value={runRange}
+            onChange={(range) => {
+              setRunRange(range);
+              setSelectedRunBar(null);
+            }}
+          />
 
           <ThemedView type="surface" style={styles.card}>
             <View style={styles.statHeader}>
@@ -197,7 +209,19 @@ export default function ProgressScreen() {
                 {TRACKING_RANGE_LABELS[runRange].toLowerCase()}
               </ThemedText>
             </View>
-            {chartWidth > 0 && <BarChart bars={runBars} width={chartWidth} color={ChartColors.cardio} />}
+            {chartWidth > 0 && (
+              <BarChart
+                bars={runBars}
+                width={chartWidth}
+                color={ChartColors.cardio}
+                selectedIndex={selectedRunBar}
+                onSelectBar={(index) => {
+                  haptics.selection();
+                  setSelectedRunBar((current) => (current === index ? null : index));
+                }}
+                calloutFormatter={(value) => `${value} ${distanceUnitLabel(unitSystem)}`}
+              />
+            )}
             {allRunSessions.length === 0 && (
               <ThemedText type="small" themeColor="textSecondary">
                 Log a run to see your trends here.
@@ -217,6 +241,7 @@ export default function ProgressScreen() {
                 color={ChartColors.bodyweight}
                 chartWidth={tileChartWidth}
                 smooth
+                onPress={() => setWeightSheetOpen(true)}
               />
               <MetricTile
                 label={
@@ -285,6 +310,13 @@ export default function ProgressScreen() {
         </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      <LogWeightSheet
+        visible={weightSheetOpen}
+        unitSystem={unitSystem}
+        currentWeight={latestWeight ? toDisplayWeight(latestWeight.weight, unitSystem) : null}
+        onSave={(displayValue) => addBodyweight({ date: todayKey(), weight: fromDisplayWeight(displayValue, unitSystem) })}
+        onClose={() => setWeightSheetOpen(false)}
+      />
       </ScreenBackground>
     </TabFadeView>
   );
@@ -440,7 +472,6 @@ function formatPaceMinutesTick(value: number): string {
 function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, unitSystem: UnitSystem): BarChartBar[] {
   const sessions = runSessionsInRange(cardioSessions, range);
   const today = new Date();
-  const todayKeyValue = toDateKey(today);
 
   if (range === 'week') {
     const weekStart = new Date(today);
@@ -452,7 +483,6 @@ function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, uni
       return {
         label: WEEKDAY_LABELS[index],
         value: toDisplayDistance(distanceForDate(sessions, dateKey), unitSystem),
-        highlighted: dateKey === todayKeyValue,
       };
     });
   }
@@ -468,13 +498,11 @@ function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, uni
       return {
         label: showLabel ? String(day) : '',
         value: toDisplayDistance(distanceForDate(sessions, dateKey), unitSystem),
-        highlighted: dateKey === todayKeyValue,
       };
     });
   }
 
   const year = today.getFullYear();
-  const currentMonth = today.getMonth();
   const monthTotals = new Array(12).fill(0);
   for (const session of sessions) {
     const [entryYear, entryMonth] = session.date.split('-').map(Number);
@@ -483,7 +511,6 @@ function buildRunBars(cardioSessions: CardioSession[], range: TrackingRange, uni
   return monthTotals.map((total, index) => ({
     label: MONTH_LABELS[index],
     value: toDisplayDistance(total, unitSystem),
-    highlighted: index === currentMonth,
   }));
 }
 

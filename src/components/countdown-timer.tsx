@@ -29,12 +29,14 @@ export function CountdownTimer({
   nextLabel,
   onDone,
   skippable,
+  warnAtTenSeconds = true,
 }: {
   seconds: number;
   label: string;
   nextLabel?: string;
   onDone: () => void;
   skippable?: boolean;
+  warnAtTenSeconds?: boolean;
 }) {
   const endsAt = useRef<number | null>(null);
   const called = useRef(false);
@@ -52,7 +54,7 @@ export function CountdownTimer({
       const left = Math.max(0, Math.ceil(((endsAt.current ?? 0) - Date.now()) / 1000));
       setRemaining(left);
       if (left !== lastHaptic.current) {
-        if (left === 10 && seconds >= 20) {
+        if (warnAtTenSeconds && left === 10 && seconds >= 20) {
           haptics.impact(Haptics.ImpactFeedbackStyle.Medium);
           lastHaptic.current = left;
         } else if (left >= 1 && left <= 3) {
@@ -68,7 +70,7 @@ export function CountdownTimer({
       }
     }, 250);
     return () => clearInterval(interval);
-  }, [onDone, seconds]);
+  }, [onDone, seconds, warnAtTenSeconds]);
 
   const ringProps = useAnimatedProps(() => ({
     strokeDashoffset: CIRCUMFERENCE * (1 - progress.value),

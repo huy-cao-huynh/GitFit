@@ -87,6 +87,18 @@ export const ChartColors = {
 } as const;
 
 /**
+ * Muscle-diagram highlight colors (Anatome API `layers` param) — lime for the
+ * primary mover. Secondary is `primaryTint` (the app's icon-tile background)
+ * flattened to a solid hex over `surfaceElevated` (the diagram's own
+ * `body_color`), since the API needs an opaque color, not primaryTint's
+ * actual translucent rgba.
+ */
+export const MuscleDiagramColors = {
+  primary: Colors.primary,
+  secondary: '#758934',
+} as const;
+
+/**
  * Corner radii: cards lg, buttons/inputs md, inner chips/segments sm,
  * circles/pills full. Deliberately tight — containers read as rectangles with
  * the corner burr knocked off, not as pills.
@@ -142,6 +154,8 @@ export const Type = {
   /** Serif numerals — every number that isn't a live timer. */
   statLg: { fontFamily: Fonts.displayBold, fontSize: 40, lineHeight: 44, ...tabular },
   statMd: { fontFamily: Fonts.displayBold, fontSize: 28, lineHeight: 32, ...tabular },
+  /** Between statLg and statMd — the in-session target reps/weight pair. */
+  statTarget: { fontFamily: Fonts.displayBold, fontSize: 36, lineHeight: 40, ...tabular },
   statSm: { fontFamily: Fonts.display, fontSize: 20, lineHeight: 24, ...tabular },
   /** Numerals sitting inline in a sans text row (legends, list rows, chips). */
   statXs: { fontFamily: Fonts.display, fontSize: 15, lineHeight: 20, ...tabular },

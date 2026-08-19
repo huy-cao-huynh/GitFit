@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,6 +18,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { searchFoods } from '@/lib/nutrition/usda-food-data-central';
 import {
   gramsToOunces,
@@ -41,6 +42,9 @@ import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 const SEARCH_DEBOUNCE_MS = 400;
+/** Rows shown per tier before the "show N more" row. Both tiers fetch deeper than this so ranking has candidates to sort. */
+const BASIC_PREVIEW_COUNT = 8;
+const BRANDED_PREVIEW_COUNT = 5;
 
 type AmountUnit = 'g' | 'oz';
 type AmountMode = 'servings' | 'custom';
@@ -68,7 +72,10 @@ export default function FoodSearchScreen() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selected, setSelected] = useState<AmountSource | null>(null);
+  const [showRecipes, setShowRecipes] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
+  const [showAllBasic, setShowAllBasic] = useState(false);
+  const [showAllBranded, setShowAllBranded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   // Debounced search; aborts the in-flight request when the query changes.
@@ -87,6 +94,9 @@ export default function FoodSearchScreen() {
         abortRef.current = controller;
         setSearching(true);
         setSearchError(null);
+        // A new query means new tails — don't carry the expanded state over.
+        setShowAllBasic(false);
+        setShowAllBranded(false);
         try {
           const found = await searchFoods(trimmed, controller.signal);
           if (!controller.signal.aborted) {
@@ -104,6 +114,12 @@ export default function FoodSearchScreen() {
     );
     return () => clearTimeout(timer);
   }, [query]);
+
+  // The provider hands back one ranked list with a `tier` on each result; the
+  // two sections are just a partition of it.
+  const basicResults = useMemo(() => results.filter((result) => result.tier === 'basic'), [results]);
+  const brandedResults = useMemo(() => results.filter((result) => result.tier === 'branded'), [results]);
+  const hasSettledQuery = query.trim().length >= 2 && !searching && !searchError;
 
   const logAndClose = (entry: Parameters<typeof addFoodLog>[0]) => {
     addFoodLog(entry);
@@ -169,6 +185,12 @@ export default function FoodSearchScreen() {
                 }
               }}
             />
+          ) : showRecipes ? (
+            <RecipePickerPanel
+              recipes={recipes}
+              onBack={() => setShowRecipes(false)}
+              onSelect={(recipe) => setSelected({ kind: 'recipe', recipe })}
+            />
           ) : showCustom ? (
             <CustomFoodPanel
               onBack={() => setShowCustom(false)}
@@ -191,12 +213,30 @@ export default function FoodSearchScreen() {
                 autoFocus
               />
 
-              <Pressable style={styles.customRow} onPress={() => setShowCustom(true)}>
-                <SymbolView name="square.and.pencil" size={18} tintColor={colors.primaryLight} />
-                <ThemedText type="small" style={{ color: colors.primaryLight }}>
-                  Add a custom food
-                </ThemedText>
-              </Pressable>
+              <View style={styles.entryPointRow}>
+                <Pressable
+                  style={styles.customRow}
+                  onPress={() => {
+                    haptics.selection();
+                    setShowRecipes(true);
+                  }}>
+                  <SymbolView name="fork.knife" size={18} tintColor={colors.primaryLight} />
+                  <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                    Log a recipe
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={styles.customRow}
+                  onPress={() => {
+                    haptics.selection();
+                    setShowCustom(true);
+                  }}>
+                  <SymbolView name="square.and.pencil" size={18} tintColor={colors.primaryLight} />
+                  <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                    Add a custom food
+                  </ThemedText>
+                </Pressable>
+              </View>
 
               {recents.length > 0 && query.trim().length < 2 && (
                 <View style={styles.recipeSection}>
@@ -220,23 +260,29 @@ export default function FoodSearchScreen() {
                 </ThemedText>
               )}
 
-              {results.map((result) => (
-                <Pressable
-                  key={result.code}
-                  style={styles.resultRow}
-                  onPress={() => setSelected({ kind: 'weight', food: result, initialGrams: 100 })}>
-                  <View style={styles.resultText}>
-                    <ThemedText type="smallBold" numberOfLines={1}>
-                      {result.name}
-                    </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                      {result.brand ? `${result.brand} · ` : ''}
-                      {Math.round(result.caloriesPer100g)} cal / 100 g
-                    </ThemedText>
-                  </View>
-                  <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
-                </Pressable>
-              ))}
+              <ResultSection
+                label="BASIC FOODS"
+                results={basicResults}
+                previewCount={BASIC_PREVIEW_COUNT}
+                expanded={showAllBasic}
+                onExpand={() => setShowAllBasic(true)}
+                onSelect={(result) => setSelected({ kind: 'weight', food: result, initialGrams: 100 })}
+              />
+
+              <ResultSection
+                label="BRANDED"
+                results={brandedResults}
+                previewCount={BRANDED_PREVIEW_COUNT}
+                expanded={showAllBranded}
+                onExpand={() => setShowAllBranded(true)}
+                onSelect={(result) => setSelected({ kind: 'weight', food: result, initialGrams: 100 })}
+              />
+
+              {hasSettledQuery && results.length === 0 && (
+                <ThemedText type="small" themeColor="textSecondary">
+                  No matches — try a simpler term, or add a custom food.
+                </ThemedText>
+              )}
 
               {recipes.length > 0 && query.trim().length < 2 && (
                 <View style={styles.recipeSection}>
@@ -337,7 +383,7 @@ function AmountPanel({
   const baseGrams = source.kind === 'weight' ? (parsedServingGrams ?? source.initialGrams) : 0;
   const perServing: Macros = isRecipe ? recipePerServing(source.recipe) : macrosForGrams(source.food, baseGrams);
 
-  const [mode, setMode] = useState<AmountMode>(isRecipe || parsedServingGrams ? 'servings' : 'custom');
+  const [mode, setMode] = useState<AmountMode>('servings');
   const [servings, setServings] = useState(1);
   const [unit, setUnit] = useState<AmountUnit>('g');
   const [amountText, setAmountText] = useState(
@@ -461,13 +507,14 @@ function AmountPanel({
       <Pressable
         style={[styles.primaryButton, !canLog && styles.primaryButtonDisabled]}
         disabled={!canLog}
-        onPress={() =>
+        onPress={() => {
+          haptics.impact();
           onLog({
             grams: grams !== undefined ? Math.round(grams * 10) / 10 : undefined,
             servings: servingsLogged,
             macros,
-          })
-        }>
+          });
+        }}>
         <ThemedText type="smallBold" style={styles.primaryButtonText}>
           Log Food
         </ThemedText>
@@ -476,6 +523,67 @@ function AmountPanel({
   );
 }
 
+/**
+ * Reached via the "Log a recipe" trigger row, distinct from the inline RECIPE
+ * BOOK section shown while browsing search results — this is the reliable,
+ * always-reachable entry point (works with zero recipes, always offers
+ * Create New Recipe) rather than a convenience shortcut.
+ */
+function RecipePickerPanel({
+  recipes,
+  onBack,
+  onSelect,
+}: {
+  recipes: Recipe[];
+  onBack: () => void;
+  onSelect: (recipe: Recipe) => void;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.panelContent} keyboardShouldPersistTaps="handled">
+      <Pressable style={styles.backRow} onPress={onBack}>
+        <SymbolView name="chevron.left" size={12} tintColor={colors.primaryLight} />
+        <ThemedText type="small" style={{ color: colors.primaryLight }}>
+          Back to search
+        </ThemedText>
+      </Pressable>
+
+      <ThemedText type="heading">Recipes</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Log a recipe you&apos;ve built, or create a new one.
+      </ThemedText>
+
+      <Pressable
+        style={styles.createRecipeRow}
+        onPress={() => {
+          haptics.selection();
+          router.push('/recipe/new');
+        }}>
+        <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+        <ThemedText type="small" style={{ color: colors.primaryLight }}>
+          Create New Recipe
+        </ThemedText>
+      </Pressable>
+
+      {recipes.length === 0 ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          Build a recipe once, then log a serving in one tap.
+        </ThemedText>
+      ) : (
+        <View style={styles.recipeSection}>
+          {recipes.map((recipe) => (
+            <RecipeSearchRow key={recipe.id} recipe={recipe} onPress={() => onSelect(recipe)} />
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+/**
+ * A one-off hand-typed food. For anything eaten repeatedly a nutrition-only
+ * recipe is the better home (it's reusable) — this is for the meal you'll
+ * never log again, so nothing is saved beyond the log entry itself.
+ */
 function CustomFoodPanel({
   onBack,
   onLog,
@@ -511,7 +619,8 @@ function CustomFoodPanel({
 
       <ThemedText type="heading">Custom food</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
-        Enter the nutrients for the amount you ate.
+        Enter the nutrients for the amount you ate. To reuse this later, save it as a nutrition-only
+        recipe instead.
       </ThemedText>
 
       <ThemedView type="surface" style={styles.panelCard}>
@@ -548,23 +657,6 @@ function CustomFoodPanel({
   );
 }
 
-function RecipeSearchRow({ recipe, onPress }: { recipe: Recipe; onPress: () => void }) {
-  const perServing = recipePerServing(recipe);
-  return (
-    <Pressable style={styles.resultRow} onPress={onPress}>
-      <View style={styles.resultText}>
-        <ThemedText type="smallBold" numberOfLines={1}>
-          {recipe.name}
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-          {Math.round(perServing.calories)} cal / serving
-        </ThemedText>
-      </View>
-      <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
-    </Pressable>
-  );
-}
-
 function LabeledInput({
   label,
   value,
@@ -594,6 +686,89 @@ function LabeledInput({
         keyboardType={numeric ? 'decimal-pad' : 'default'}
       />
     </View>
+  );
+}
+
+/**
+ * One tier's results under a heading, collapsed to `previewCount` rows. Both
+ * tiers over-fetch to give the ranker a deep pool, so both need the same
+ * "show the rest" affordance. Renders nothing when the tier is empty.
+ */
+function ResultSection({
+  label,
+  results,
+  previewCount,
+  expanded,
+  onExpand,
+  onSelect,
+}: {
+  label: string;
+  results: FoodSearchResult[];
+  previewCount: number;
+  expanded: boolean;
+  onExpand: () => void;
+  onSelect: (result: FoodSearchResult) => void;
+}) {
+  if (results.length === 0) return null;
+  const visible = expanded ? results : results.slice(0, previewCount);
+  const hidden = results.length - visible.length;
+
+  return (
+    <View style={styles.recipeSection}>
+      <ThemedText type="label" style={styles.sectionLabel}>
+        {label}
+      </ThemedText>
+      {visible.map((result) => (
+        <ResultRow key={result.code} result={result} onPress={() => onSelect(result)} />
+      ))}
+      {hidden > 0 && (
+        <Pressable
+          style={styles.customRow}
+          onPress={() => {
+            haptics.selection();
+            onExpand();
+          }}>
+          <SymbolView name="chevron.down" size={14} tintColor={colors.primaryLight} />
+          <ThemedText type="small" style={{ color: colors.primaryLight }}>
+            Show {hidden} more
+          </ThemedText>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function ResultRow({ result, onPress }: { result: FoodSearchResult; onPress: () => void }) {
+  return (
+    <Pressable style={styles.resultRow} onPress={onPress}>
+      <View style={styles.resultText}>
+        <ThemedText type="smallBold" numberOfLines={1}>
+          {result.name}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+          {result.brand ? `${result.brand} · ` : ''}
+          {Math.round(result.caloriesPer100g)} cal / 100 g
+        </ThemedText>
+      </View>
+      <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+    </Pressable>
+  );
+}
+
+function RecipeSearchRow({ recipe, onPress }: { recipe: Recipe; onPress: () => void }) {
+  const perServing = recipePerServing(recipe);
+  return (
+    <Pressable style={styles.resultRow} onPress={onPress}>
+      <View style={styles.resultText}>
+        <ThemedText type="smallBold" numberOfLines={1}>
+          {recipe.name}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+          {Math.round(perServing.calories)} cal / serving
+        </ThemedText>
+      </View>
+      <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+    </Pressable>
   );
 }
 
@@ -675,11 +850,31 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     color: colors.text,
   },
+  entryPointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
   customRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     paddingVertical: Spacing.two,
+  },
+  labeledInput: {
+    gap: Spacing.one,
+  },
+  customGrid: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  textInput: {
+    borderRadius: Radius.sm,
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+    color: colors.text,
   },
   spinner: {
     paddingVertical: Spacing.three,
@@ -784,19 +979,14 @@ const styles = StyleSheet.create({
   previewEmphasis: {
     color: colors.primaryLight,
   },
-  labeledInput: {
-    gap: Spacing.one,
-  },
-  customGrid: {
+  createRecipeRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.two,
-  },
-  textInput: {
-    borderRadius: Radius.sm,
-    backgroundColor: colors.surfaceElevated,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.two,
-    color: colors.text,
+    borderRadius: Radius.md,
+    backgroundColor: colors.surface,
+    padding: Spacing.three,
+    marginTop: Spacing.two,
   },
   primaryButton: {
     borderRadius: Radius.md,

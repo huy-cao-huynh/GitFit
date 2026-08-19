@@ -12,6 +12,7 @@ import Animated, {
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Motion, Radius, Spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { allGoalsStreak } from '@/lib/store/derive';
 import type { CheckoffDef, CheckoffLog } from '@/lib/store/types';
 
@@ -120,7 +121,13 @@ export function DailyGoalsCard({
         {defs.map((def) => {
           const isDone = doneToday.includes(def.id);
           return (
-            <Pressable key={def.id} style={styles.row} onPress={() => onToggle(def.id)}>
+            <Pressable
+              key={def.id}
+              style={styles.row}
+              onPress={() => {
+                haptics.impact();
+                onToggle(def.id);
+              }}>
               <View style={[styles.checkCircle, isDone ? styles.checkCircleDone : styles.checkCircleTodo]}>
                 {isDone ? <SymbolView name="checkmark" size={12} tintColor={colors.onPrimary} /> : null}
               </View>

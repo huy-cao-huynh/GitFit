@@ -2,6 +2,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -16,12 +17,16 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
 import { ExerciseSetEditor } from '@/components/exercise-set-editor';
+import { MuscleDiagramSheet } from '@/components/muscle-diagram-sheet';
 import { ScheduleDaySelector } from '@/components/schedule-day-selector';
 import { SortableList } from '@/components/sortable-list';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { searchExercises } from '@/lib/anatome/client';
+import type { ExerciseSearchResult, MuscleLayers } from '@/lib/anatome/layers';
 import { haptics } from '@/lib/haptics';
+import { anatomeSlugsFor, resolveMuscleLayers } from '@/lib/muscles';
 import { describeExerciseSets } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
 import type { ExerciseKind, Routine, RoutineExercise, RoutineSet, UnitSystem, Weekday } from '@/lib/store/types';
@@ -30,6 +35,7 @@ import { useStore } from '@/providers/store-provider';
 const colors = Colors;
 const DEFAULT_REST_SECONDS = 60;
 const EXERCISE_ROW_HEIGHT = 64;
+const SEARCH_DEBOUNCE_MS = 400;
 
 interface DraftExercise {
   id: string;
@@ -38,6 +44,8 @@ interface DraftExercise {
   sets: RoutineSet[];
   restSec: number;
   lastTime: RoutineExercise['lastTime'];
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
 }
 
 function blankExercise(): DraftExercise {
@@ -63,10 +71,45 @@ export default function RoutineEditorScreen() {
       sets: exercise.sets,
       restSec: exercise.restSec ?? DEFAULT_REST_SECONDS,
       lastTime: exercise.lastTime,
+      primaryMuscles: exercise.primaryMuscles,
+      secondaryMuscles: exercise.secondaryMuscles,
     })) ?? [],
   );
   const [editingExercise, setEditingExercise] = useState<DraftExercise | null>(null);
   const [isNewExercise, setIsNewExercise] = useState(false);
+  const [exerciseQuery, setExerciseQuery] = useState('');
+  const [exerciseResults, setExerciseResults] = useState<ExerciseSearchResult[]>([]);
+  const [exerciseSearching, setExerciseSearching] = useState(false);
+  const exerciseSearchAbortRef = useRef<AbortController | null>(null);
+
+  // Debounced exercise-name search; aborts the in-flight request when the query changes.
+  useEffect(() => {
+    const trimmed = exerciseQuery.trim();
+    const timer = setTimeout(
+      async () => {
+        exerciseSearchAbortRef.current?.abort();
+        if (trimmed.length < 2) {
+          setExerciseResults([]);
+          setExerciseSearching(false);
+          return;
+        }
+        const controller = new AbortController();
+        exerciseSearchAbortRef.current = controller;
+        setExerciseSearching(true);
+        try {
+          const found = await searchExercises(trimmed, controller.signal);
+          if (!controller.signal.aborted) {
+            setExerciseResults(found);
+            setExerciseSearching(false);
+          }
+        } catch {
+          if (!controller.signal.aborted) setExerciseSearching(false);
+        }
+      },
+      trimmed.length < 2 ? 0 : SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [exerciseQuery]);
 
   // Dirty tracking is "touched at all," not deep-equality — good enough to
   // catch an accidental swipe-down after a real edit without the complexity
@@ -120,6 +163,8 @@ export default function RoutineEditorScreen() {
         sets: exercise.sets,
         restSec: exercise.restSec,
         lastTime: exercise.lastTime,
+        primaryMuscles: exercise.primaryMuscles,
+        secondaryMuscles: exercise.secondaryMuscles,
       })),
     };
     bypassPromptRef.current = true;
@@ -166,20 +211,46 @@ export default function RoutineEditorScreen() {
   const openNewExercise = () => {
     setEditingExercise(blankExercise());
     setIsNewExercise(true);
+    setExerciseQuery('');
+    setExerciseResults([]);
   };
 
   const openEditExercise = (exercise: DraftExercise) => {
     setEditingExercise({ ...exercise, sets: exercise.sets.map((set) => ({ ...set })) });
     setIsNewExercise(false);
+    setExerciseQuery('');
+    setExerciseResults([]);
   };
 
   const closeExerciseEditor = () => setEditingExercise(null);
+
+  const selectExerciseResult = (result: ExerciseSearchResult) => {
+    haptics.selection();
+    setEditingExercise((current) =>
+      current
+        ? {
+            ...current,
+            name: result.name,
+            primaryMuscles: result.anatome_primary_slugs,
+            secondaryMuscles: result.anatome_secondary_slugs,
+          }
+        : current,
+    );
+    setExerciseQuery('');
+    setExerciseResults([]);
+  };
 
   const canSaveExercise = !!editingExercise && editingExercise.name.trim().length > 0 && editingExercise.sets.length > 0;
 
   const saveExercise = () => {
     if (!editingExercise || !canSaveExercise) return;
-    const saved: DraftExercise = { ...editingExercise, name: editingExercise.name.trim() };
+    const name = editingExercise.name.trim();
+    const fallback = editingExercise.primaryMuscles?.length ? null : anatomeSlugsFor(name);
+    const saved: DraftExercise = {
+      ...editingExercise,
+      name,
+      ...(fallback ? { primaryMuscles: fallback.primary, secondaryMuscles: fallback.secondary } : {}),
+    };
     setExercises((current) =>
       isNewExercise ? [...current, saved] : current.map((exercise) => (exercise.id === saved.id ? saved : exercise)),
     );
@@ -308,10 +379,38 @@ export default function RoutineEditorScreen() {
                       placeholder="Exercise name"
                       placeholderTextColor={colors.textSecondary}
                       value={editingExercise.name}
-                      onChangeText={(text) =>
-                        setEditingExercise((current) => (current ? { ...current, name: text } : current))
-                      }
+                      onChangeText={(text) => {
+                        setEditingExercise((current) =>
+                          current ? { ...current, name: text, primaryMuscles: undefined, secondaryMuscles: undefined } : current,
+                        );
+                        setExerciseQuery(text);
+                      }}
                       autoFocus={isNewExercise}
+                    />
+
+                    {exerciseSearching || exerciseResults.length > 0 ? (
+                      <View style={styles.searchDropdown}>
+                        {exerciseSearching ? (
+                          <View style={styles.searchLoadingRow}>
+                            <ActivityIndicator color={colors.textSecondary} />
+                          </View>
+                        ) : (
+                          exerciseResults.map((result) => (
+                            <Pressable
+                              key={result.ext_id}
+                              style={styles.searchResultRow}
+                              onPress={() => selectExerciseResult(result)}>
+                              <ThemedText type="small" numberOfLines={1} style={styles.flex}>
+                                {result.name}
+                              </ThemedText>
+                            </Pressable>
+                          ))
+                        )}
+                      </View>
+                    ) : null}
+
+                    <MusclePreview
+                      layers={resolveMuscleLayers(editingExercise)}
                     />
 
                     <ModeToggle
@@ -374,6 +473,28 @@ function ExerciseRow({
       <SymbolView name="pencil" size={16} tintColor={colors.textSecondary} />
       {dragHandle}
     </Pressable>
+  );
+}
+
+/** Link beneath the exercise-name input to a larger diagram + chip breakdown. Renders nothing if nothing resolved yet. */
+function MusclePreview({ layers }: { layers: MuscleLayers }) {
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const slugs = [...layers.primary, ...layers.secondary];
+  if (slugs.length === 0) return null;
+  return (
+    <View style={styles.musclePreview}>
+      <Pressable hitSlop={6} onPress={() => setSheetOpen(true)}>
+        <ThemedText type="small" style={{ color: colors.primaryLight }}>
+          View muscle groups
+        </ThemedText>
+      </Pressable>
+      <MuscleDiagramSheet
+        visible={sheetOpen}
+        primary={layers.primary}
+        secondary={layers.secondary}
+        onClose={() => setSheetOpen(false)}
+      />
+    </View>
   );
 }
 
@@ -497,5 +618,25 @@ const styles = StyleSheet.create({
   modalContent: {
     gap: Spacing.three,
     paddingBottom: Spacing.six,
+  },
+  searchDropdown: {
+    borderRadius: Radius.md,
+    backgroundColor: colors.surfaceElevated,
+    overflow: 'hidden',
+  },
+  searchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two + Spacing.half,
+  },
+  searchLoadingRow: {
+    paddingVertical: Spacing.three,
+    alignItems: 'center',
+  },
+  musclePreview: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
   },
 });
