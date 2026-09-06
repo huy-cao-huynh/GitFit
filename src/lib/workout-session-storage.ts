@@ -3,7 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RoutineExercise, SessionExercise } from '@/lib/store/types';
 
 /** Mirrors `SessionPhase` in `src/app/workout/[id].tsx`, duplicated to avoid importing a route module. */
-export type PersistedSessionPhase = 'exerciseReady' | 'setPending' | 'setActive' | 'setLogging' | 'resting' | 'finished';
+export type PersistedSessionPhase =
+  | 'exerciseReady'
+  | 'setPending'
+  | 'setActive'
+  | 'setLogging'
+  | 'resting'
+  | 'exerciseComplete'
+  | 'finished';
 
 export interface PersistedWorkoutExercise extends RoutineExercise {
   restSec: number;

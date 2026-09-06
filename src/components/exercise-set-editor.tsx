@@ -208,9 +208,22 @@ function EditableValue({
     return () => cancelAnimationFrame(frame);
   }, [editing]);
 
+  const push = (text: string) => {
+    const parsed = Number(text);
+    if (text.trim() !== '' && Number.isFinite(parsed)) {
+      onChange(clampToStep(parsed, min, Number.POSITIVE_INFINITY, step));
+    }
+  };
+
+  // See Stepper: pushing each keystroke keeps a typed value from being lost
+  // when the next tap is the screen's own Save button.
+  const editDraft = (text: string) => {
+    setDraft(text);
+    push(text);
+  };
+
   const commit = () => {
-    const parsed = Number(draft);
-    if (Number.isFinite(parsed)) onChange(clampToStep(parsed, min, Number.POSITIVE_INFINITY, step));
+    push(draft);
     setEditing(false);
   };
 
@@ -220,7 +233,7 @@ function EditableValue({
         ref={inputRef}
         style={styles.valueInput}
         value={draft}
-        onChangeText={setDraft}
+        onChangeText={editDraft}
         onBlur={commit}
         onSubmitEditing={commit}
         keyboardType="decimal-pad"

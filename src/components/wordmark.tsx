@@ -29,7 +29,9 @@ const RISE = 8;
  * sweeping from grey to lime as it settles — the app's opening animation,
  * owned by `AppIntro`. Every other render site passes `animate={false}`, since
  * replaying the reveal on a screen that appears right after the intro reads as
- * a stutter, not a flourish.
+ * a stutter, not a flourish. `AppIntro` also triggers `exit` once the mark has
+ * held: the same left-to-right stagger in reverse, so the letters leave the
+ * way they arrived instead of the whole mark cross-fading as one block.
  *
  * Letters are separate Views in a row rather than nested <Text> nodes: a
  * transform on a Text nested inside another Text doesn't reliably apply on
@@ -40,6 +42,8 @@ export function Wordmark({
   animate = false,
   delay = 0,
   onDone,
+  exit = false,
+  onExitDone,
 }: {
   size?: number;
   /** Play the staggered reveal. Off by default — only the launch intro animates. */
@@ -48,6 +52,10 @@ export function Wordmark({
   delay?: number;
   /** Fires once the last letter has settled. */
   onDone?: () => void;
+  /** Play the staggered letter-by-letter exit, left to right. */
+  exit?: boolean;
+  /** Fires once the last letter has left. */
+  onExitDone?: () => void;
 }) {
   const letters = [
     ...[...WORDMARK_PARTS.neutral].map((char) => ({ char, accent: false })),
@@ -66,6 +74,9 @@ export function Wordmark({
           animate={animate}
           delay={delay + index * STAGGER_MS}
           onDone={index === letters.length - 1 ? onDone : undefined}
+          exit={exit}
+          exitDelay={index * STAGGER_MS}
+          onExitDone={index === letters.length - 1 ? onExitDone : undefined}
           // The last letter still carries a trailing tracking gap it has no
           // neighbour for, which would pull the row off-centre; cancel it.
           style={[textStyle, index === letters.length - 1 ? { marginRight: -tracking } : null]}
@@ -81,6 +92,9 @@ function AnimatedLetter({
   animate,
   delay,
   onDone,
+  exit,
+  exitDelay,
+  onExitDone,
   style,
 }: {
   char: string;
@@ -88,6 +102,9 @@ function AnimatedLetter({
   animate: boolean;
   delay: number;
   onDone?: () => void;
+  exit: boolean;
+  exitDelay: number;
+  onExitDone?: () => void;
   style: StyleProp<TextStyle>;
 }) {
   const progress = useSharedValue(animate ? 0 : 1);
@@ -104,6 +121,19 @@ function AnimatedLetter({
       ),
     );
   }, [animate, delay, onDone, progress]);
+
+  useEffect(() => {
+    if (!exit) return;
+    const finish = onExitDone;
+    progress.set(
+      withDelay(
+        exitDelay,
+        withTiming(0, { duration: Motion.base }, (done) => {
+          if (done && finish) runOnJS(finish)();
+        }),
+      ),
+    );
+  }, [exit, exitDelay, onExitDone, progress]);
 
   const viewStyle = useAnimatedStyle(() => ({
     opacity: progress.get(),

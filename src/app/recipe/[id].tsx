@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -58,6 +58,13 @@ function emptyDraft(): IngredientDraft {
   return { id: makeId(), name: '', grams: '', calories: '', proteinG: '', carbsG: '', fatG: '' };
 }
 
+/** Scales a text macro value by `ratio`, rounded to `decimals` places. */
+function scaleValue(value: string, ratio: number, decimals: number): string {
+  const num = Number(value) || 0;
+  const factor = 10 ** decimals;
+  return String(Math.round(num * ratio * factor) / factor);
+}
+
 function fromDraft(draft: IngredientDraft): RecipeIngredient {
   return {
     id: draft.id,
@@ -98,21 +105,37 @@ function fromMacroDraft(draft: MacroDraft): Macros {
 export default function RecipeEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { recipes, addRecipe, updateRecipe, deleteRecipe } = useStore();
+  const navigation = useNavigation();
   const isNew = id === 'new';
   const existing = isNew ? undefined : recipes.find((recipe) => recipe.id === id);
 
   const [name, setName] = useState(existing?.name ?? '');
   const [servings, setServings] = useState(existing?.servings ?? 1);
   const [entryMode, setEntryMode] = useState<RecipeEntryMode>(existing?.entryMode ?? 'ingredients');
-  const [ingredients, setIngredients] = useState<IngredientDraft[]>(
-    existing && existing.ingredients.length > 0 ? existing.ingredients.map(toDraft) : [emptyDraft()],
-  );
+  // Starts empty — even a fresh manual row would be an "ingredient tab" open
+  // before the user has chosen how to add one. The Add ingredient / Search
+  // ingredient row below is the only way in.
+  const [ingredients, setIngredients] = useState<IngredientDraft[]>(existing?.ingredients.map(toDraft) ?? []);
   // Kept independently of `ingredients` so flipping the mode back and forth
   // never discards work the user already typed on the other side.
   const [labelDraft, setLabelDraft] = useState<MacroDraft>(
     existing?.perServing ? toMacroDraft(existing.perServing) : emptyMacroDraft(),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Dirty tracking is "touched at all," not deep-equality — good enough to
+  // catch an accidental swipe-down after a real edit without the complexity
+  // of diffing against the original. bypassPromptRef lets our own
+  // Save/Discard navigate back without re-triggering the prompt. The swipe
+  // gesture stays enabled (unlike the routine editor's dirty-tracking, which
+  // disables it) — a swipe-down is exactly the case this prompt exists for,
+  // so `beforeRemove` below has to actually see it, not have it silenced.
+  const dirtyRef = useRef(false);
+  const bypassPromptRef = useRef(false);
+  const markDirty = () => {
+    dirtyRef.current = true;
+  };
 
   const isMacroMode = entryMode === 'macros';
   const parsed = ingredients.map(fromDraft).filter((ingredient) => ingredient.name.length > 0);
@@ -127,13 +150,35 @@ export default function RecipeEditorScreen() {
   const canSave =
     name.trim().length > 0 && (isMacroMode ? labelMacros.calories > 0 : parsed.length > 0);
 
+  /**
+   * Editing "Grams" on an already-added ingredient rescales the rest of its
+   * macros by the same ratio, rather than leaving them pinned to whatever the
+   * portion was when it was added — otherwise doubling the grams silently
+   * kept the old calories/protein/carbs/fat.
+   */
   const updateIngredient = (draftId: string, patch: Partial<IngredientDraft>) => {
+    markDirty();
     setIngredients((current) =>
-      current.map((draft) => (draft.id === draftId ? { ...draft, ...patch } : draft)),
+      current.map((draft) => {
+        if (draft.id !== draftId) return draft;
+        if (patch.grams === undefined) return { ...draft, ...patch };
+        const previousGrams = Number(draft.grams);
+        const nextGrams = Number(patch.grams);
+        if (!(previousGrams > 0) || !(nextGrams > 0)) return { ...draft, ...patch };
+        const ratio = nextGrams / previousGrams;
+        return {
+          ...draft,
+          ...patch,
+          calories: scaleValue(draft.calories, ratio, 0),
+          proteinG: scaleValue(draft.proteinG, ratio, 1),
+          carbsG: scaleValue(draft.carbsG, ratio, 1),
+          fatG: scaleValue(draft.fatG, ratio, 1),
+        };
+      }),
     );
   };
 
-  const save = () => {
+  const save = useCallback(() => {
     haptics.notification(Haptics.NotificationFeedbackType.Success);
     const recipe: Recipe = {
       id: isNew ? makeId() : id!,
@@ -145,10 +190,11 @@ export default function RecipeEditorScreen() {
       perServing: isMacroMode ? labelMacros : undefined,
       ingredients: isMacroMode ? [] : parsed,
     };
+    bypassPromptRef.current = true;
     if (isNew) addRecipe(recipe);
     else updateRecipe(recipe);
     router.back();
-  };
+  }, [isNew, id, name, isMacroMode, servings, entryMode, labelMacros, parsed, addRecipe, updateRecipe]);
 
   const confirmDelete = () => {
     Alert.alert('Delete recipe?', 'Logged servings keep their nutrients.', [
@@ -158,12 +204,36 @@ export default function RecipeEditorScreen() {
         style: 'destructive',
         onPress: () => {
           haptics.notification(Haptics.NotificationFeedbackType.Warning);
+          bypassPromptRef.current = true;
           deleteRecipe(id!);
           router.back();
         },
       },
     ]);
   };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (!dirtyRef.current || bypassPromptRef.current) return;
+      e.preventDefault();
+      const discard = () => {
+        bypassPromptRef.current = true;
+        navigation.dispatch(e.data.action);
+      };
+      const buttons = canSave
+        ? [
+            { text: 'Keep Editing', style: 'cancel' as const },
+            { text: 'Save', onPress: save },
+            { text: 'Discard', style: 'destructive' as const, onPress: discard },
+          ]
+        : [
+            { text: 'Keep Editing', style: 'cancel' as const },
+            { text: 'Discard', style: 'destructive' as const, onPress: discard },
+          ];
+      Alert.alert('Discard changes?', 'You have unsaved changes to this recipe.', buttons);
+    });
+    return unsubscribe;
+  }, [navigation, canSave, save]);
 
   return (
     <ThemedView style={styles.container}>
@@ -186,6 +256,7 @@ export default function RecipeEditorScreen() {
           </View>
 
           <ScrollView
+            ref={scrollViewRef}
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
@@ -194,7 +265,10 @@ export default function RecipeEditorScreen() {
               placeholder="Recipe name"
               placeholderTextColor={colors.textSecondary}
               value={name}
-              onChangeText={setName}
+              onChangeText={(text) => {
+                setName(text);
+                markDirty();
+              }}
             />
 
             <View style={styles.modeToggle}>
@@ -212,6 +286,7 @@ export default function RecipeEditorScreen() {
                     onPress={() => {
                       haptics.selection();
                       setEntryMode(mode);
+                      markDirty();
                     }}>
                     <ThemedText type="small" themeColor={active ? 'onPrimary' : 'textSecondary'}>
                       {label}
@@ -231,7 +306,17 @@ export default function RecipeEditorScreen() {
                 </View>
               ) : (
                 <View style={styles.servingsRow}>
-                  <Stepper label="Servings" value={servings} min={1} max={50} step={1} onChange={setServings} />
+                  <Stepper
+                    label="Servings"
+                    value={servings}
+                    min={1}
+                    max={50}
+                    step={1}
+                    onChange={(value) => {
+                      setServings(value);
+                      markDirty();
+                    }}
+                  />
                   <View style={styles.perServing}>
                     <ThemedText type="smallBold">{Math.round(perServing.calories)} cal</ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
@@ -256,22 +341,34 @@ export default function RecipeEditorScreen() {
                   <MacroInput
                     label="Cal"
                     value={labelDraft.calories}
-                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, calories: text }))}
+                    onChangeText={(text) => {
+                      setLabelDraft((current) => ({ ...current, calories: text }));
+                      markDirty();
+                    }}
                   />
                   <MacroInput
                     label="Protein"
                     value={labelDraft.proteinG}
-                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, proteinG: text }))}
+                    onChangeText={(text) => {
+                      setLabelDraft((current) => ({ ...current, proteinG: text }));
+                      markDirty();
+                    }}
                   />
                   <MacroInput
                     label="Carbs"
                     value={labelDraft.carbsG}
-                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, carbsG: text }))}
+                    onChangeText={(text) => {
+                      setLabelDraft((current) => ({ ...current, carbsG: text }));
+                      markDirty();
+                    }}
                   />
                   <MacroInput
                     label="Fat"
                     value={labelDraft.fatG}
-                    onChangeText={(text) => setLabelDraft((current) => ({ ...current, fatG: text }))}
+                    onChangeText={(text) => {
+                      setLabelDraft((current) => ({ ...current, fatG: text }));
+                      markDirty();
+                    }}
                   />
                 </View>
               </ThemedView>
@@ -292,6 +389,7 @@ export default function RecipeEditorScreen() {
                     onPress={() => {
                       haptics.selection();
                       setIngredients((current) => current.filter((candidate) => candidate.id !== draft.id));
+                      markDirty();
                     }}>
                     <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
                   </Pressable>
@@ -328,9 +426,11 @@ export default function RecipeEditorScreen() {
 
             {isMacroMode ? null : pickerOpen ? (
               <IngredientPicker
+                scrollViewRef={scrollViewRef}
                 onAdd={(draft) => {
                   setIngredients((current) => [...current, draft]);
                   setPickerOpen(false);
+                  markDirty();
                 }}
                 onCancel={() => setPickerOpen(false)}
               />
@@ -341,6 +441,7 @@ export default function RecipeEditorScreen() {
                   onPress={() => {
                     haptics.selection();
                     setIngredients((current) => [...current, emptyDraft()]);
+                    markDirty();
                   }}>
                   <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
                   <ThemedText type="small" style={{ color: colors.primaryLight }}>
@@ -379,9 +480,12 @@ export default function RecipeEditorScreen() {
 function IngredientPicker({
   onAdd,
   onCancel,
+  scrollViewRef,
 }: {
   onAdd: (draft: IngredientDraft) => void;
   onCancel: () => void;
+  /** The recipe form's own ScrollView — the picker lives inline in it, so opening it or focusing its search field can leave the input riding under the keyboard unless we scroll it into view ourselves. */
+  scrollViewRef: RefObject<ScrollView | null>;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodSearchResult[]>([]);
@@ -389,6 +493,16 @@ function IngredientPicker({
   const [picked, setPicked] = useState<FoodSearchResult | null>(null);
   const [gramsText, setGramsText] = useState('100');
   const abortRef = useRef<AbortController | null>(null);
+
+  const scrollIntoView = () => {
+    requestAnimationFrame(() => scrollViewRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  // The picker card is the last thing in the form when it's open, so
+  // bringing it (and the keyboard it's about to summon) into view on mount
+  // is enough to keep the search field readable as the user types.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => scrollIntoView(), []);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -468,6 +582,7 @@ function IngredientPicker({
           placeholderTextColor={colors.textSecondary}
           value={query}
           onChangeText={setQuery}
+          onFocus={scrollIntoView}
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus

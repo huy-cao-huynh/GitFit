@@ -40,11 +40,23 @@ export function Stepper({
     return () => cancelAnimationFrame(frame);
   }, [editing]);
 
-  const commitDraft = () => {
-    const parsed = Number(draft);
-    if (Number.isFinite(parsed)) {
+  const pushDraft = (text: string) => {
+    const parsed = Number(text);
+    if (text.trim() !== '' && Number.isFinite(parsed)) {
       onChange(clampToStep(parsed, min, max ?? Number.POSITIVE_INFINITY, step));
     }
+  };
+
+  // Live rather than on blur: a value typed and then committed by tapping a
+  // parent's button in one go would otherwise never reach the parent, which
+  // read its state before this input blurred.
+  const editDraft = (text: string) => {
+    setDraft(text);
+    pushDraft(text);
+  };
+
+  const commitDraft = () => {
+    pushDraft(draft);
     setEditing(false);
   };
 
@@ -64,7 +76,7 @@ export function Stepper({
             ref={inputRef}
             style={styles.stepperInput}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={editDraft}
             onBlur={commitDraft}
             onSubmitEditing={commitDraft}
             keyboardType="decimal-pad"

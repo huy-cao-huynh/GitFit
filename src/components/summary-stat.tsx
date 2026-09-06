@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { AnimatedNumber } from '@/components/animated-number';
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Spacing } from '@/constants/theme';
+import { Colors, Spacing, type ThemeColor } from '@/constants/theme';
 
 /**
  * Big serif value + unit over a caption. `animatedValue` counts up instead of
@@ -18,6 +18,7 @@ export function SummaryStat({
   label,
   icon,
   centered,
+  valueColor,
 }: {
   value?: string;
   animatedValue?: number;
@@ -25,16 +26,18 @@ export function SummaryStat({
   label: string;
   icon?: SFSymbol;
   centered?: boolean;
+  /** Colour for the value only — `primary` marks a win. The caption stays secondary either way. */
+  valueColor?: ThemeColor;
 }) {
   return (
     <View style={[styles.stat, centered && styles.centered]}>
       {animatedValue !== undefined ? (
         <View style={styles.animatedRow}>
-          <AnimatedNumber value={animatedValue} />
+          <AnimatedNumber value={animatedValue} style={valueColor ? { color: Colors[valueColor] } : undefined} />
           {unit ? <ThemedText type="small">{unit}</ThemedText> : null}
         </View>
       ) : (
-        <ThemedText type="stat">
+        <ThemedText type="stat" themeColor={valueColor}>
           {value}
           {unit ? <ThemedText type="small"> {unit}</ThemedText> : null}
         </ThemedText>

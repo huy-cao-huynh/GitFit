@@ -30,17 +30,15 @@ const CONTENT_DELAY = 220;
 const LOAD_DELAY = 320;
 const NUMBER_MS = 800;
 const AXIS_DELAY = 880;
-/** Beat to sit on once everything has landed, before auto-dismissing. */
-const HOLD_MS = 560;
 
 /**
- * The PR moment: a lime panel wipes up from the bottom edge and a barbell
- * loads itself plate by plate while the weight counts up off the old record,
- * landing on a marker that slides past it.
+ * The PR moment: a lime panel wipes up from the bottom edge and the bar (or
+ * dumbbell) loads itself plate by plate while the weight counts up off the old
+ * record, landing on a marker that slides past it.
  *
- * Auto-dismisses. A heavy session can PR on several exercises, and a blocking
- * "tap to continue" turns the payoff into an interruption; a tap anywhere
- * skips straight to the fade-out instead.
+ * It waits for a tap. The animation is the payoff for the set, so it holds
+ * until the lifter is done looking rather than pulling itself away mid-read;
+ * a tap anywhere continues.
  */
 export function PRCelebration({
   celebration,
@@ -75,13 +73,16 @@ function PRCelebrationBody({
   unitSystem: UnitSystem;
   onDismiss: () => void;
 }) {
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const unit = weightUnitLabel(unitSystem);
   const displayWeight = toDisplayWeight(celebration.weight, unitSystem);
   const displayPrior =
     celebration.priorWeight === undefined ? null : toDisplayWeight(celebration.priorWeight, unitSystem);
-  const load = platesForWeight(celebration.weight, unitSystem);
+  const load = platesForWeight(celebration.weight, unitSystem, celebration.name);
   const heaviest = load.perSide[0] ?? 1;
+  // A barbell only reads traditional at close to full width; the record axis
+  // below keeps its own fixed scale.
+  const barWidth = load.implement === 'barbell' ? Math.min(width - Spacing.four * 2, 340) : undefined;
   const whole = displayWeight % 1 === 0 && (displayPrior ?? 0) % 1 === 0;
 
   // When everything has landed: the slowest of the count-up, the axis marker,
@@ -95,6 +96,7 @@ function PRCelebrationBody({
   const wipe = useSharedValue(height);
   const fade = useSharedValue(1);
   const content = useSharedValue(0);
+  const invite = useSharedValue(0);
   const dismissed = useRef(false);
   // One list, never reassigned, so the unmount cleanup always sees every timer
   // — including the one `finish` adds for the delayed onDismiss.
@@ -102,8 +104,7 @@ function PRCelebrationBody({
 
   /**
    * `onDismiss` advances the workout's phase machine, so it must fire exactly
-   * once: `dismissed` guards the race between the auto-dismiss timer and a
-   * late tap.
+   * once: `dismissed` guards a second tap landing during the fade-out.
    */
   const finish = useCallback(() => {
     if (dismissed.current) return;
@@ -118,32 +119,39 @@ function PRCelebrationBody({
     const scheduled = timers.current;
     wipe.set(withTiming(0, { duration: WIPE_MS, easing: Easing.out(Easing.quad) }));
     content.set(withDelay(CONTENT_DELAY, withTiming(1, { duration: Motion.base })));
+    // The invitation to move on appears only once everything has landed —
+    // during the animation it would read as an escape hatch.
+    invite.set(withDelay(peakMs, withTiming(1, { duration: Motion.base })));
     scheduled.push(setTimeout(() => haptics.notification(Haptics.NotificationFeedbackType.Success), peakMs));
-    scheduled.push(setTimeout(finish, peakMs + HOLD_MS));
     return () => {
       scheduled.forEach(clearTimeout);
       scheduled.length = 0;
     };
-  }, [content, finish, peakMs, wipe]);
+  }, [content, invite, peakMs, wipe]);
 
   const panelStyle = useAnimatedStyle(() => ({
     opacity: fade.get(),
     transform: [{ translateY: wipe.get() }],
   }));
   const contentStyle = useAnimatedStyle(() => ({ opacity: content.get() }));
+  const inviteStyle = useAnimatedStyle(() => ({ opacity: invite.get() }));
 
   return (
     <Animated.View style={[styles.panel, panelStyle]}>
-      <Pressable style={styles.flex} onPress={finish} accessibilityLabel="Skip celebration">
+      <Pressable style={styles.flex} onPress={finish} accessibilityLabel="Continue">
         <SafeAreaView style={styles.flex}>
           <Animated.View style={[styles.content, contentStyle]}>
             <ThemedText type="label" style={styles.dim}>
               {displayPrior === null ? 'FIRST LIFT' : 'PERSONAL RECORD'}
             </ThemedText>
 
-            {load.isBarbell ? (
-              <BarbellLoad perSide={load.perSide} heaviest={heaviest} startDelay={LOAD_DELAY - CONTENT_DELAY} />
-            ) : null}
+            <BarbellLoad
+              perSide={load.perSide}
+              heaviest={heaviest}
+              variant={load.implement}
+              width={barWidth}
+              startDelay={LOAD_DELAY - CONTENT_DELAY}
+            />
 
             <View style={styles.readout}>
               <AnimatedNumber
@@ -172,9 +180,9 @@ function PRCelebrationBody({
             </ThemedText>
           </Animated.View>
 
-          <Animated.View style={[styles.skip, contentStyle]}>
+          <Animated.View style={[styles.skip, inviteStyle]}>
             <ThemedText type="caption" style={styles.dim}>
-              Tap to skip
+              Tap to continue
             </ThemedText>
           </Animated.View>
         </SafeAreaView>

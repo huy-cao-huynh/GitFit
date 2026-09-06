@@ -11,6 +11,7 @@ import { MuscleDiagram } from '@/components/muscle-diagram';
 import { PRCelebration, type PRRecord } from '@/components/pr-celebration';
 import { SortableList } from '@/components/sortable-list';
 import { SummaryStat } from '@/components/summary-stat';
+import { SwipeToDelete } from '@/components/swipe-to-delete';
 import { ThemedText } from '@/components/themed-text';
 import { TimerText } from '@/components/timer-text';
 import { ThemedView } from '@/components/themed-view';
@@ -28,9 +29,16 @@ import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 const REST_SECONDS = 30;
+/**
+ * Flat ceilings for the in-session steppers. These used to be derived from the
+ * routine's target (2x reps / 2x weight), which hard-stopped any set heavier or
+ * longer than planned — a 145 lb target capped the weight stepper at 290.
+ */
+const MAX_WEIGHT: Record<UnitSystem, number> = { imperial: 1000, metric: 450 };
+const MAX_REPS = 100;
 const QUEUE_ROW_HEIGHT = 56;
 
-type SessionPhase = 'exerciseReady' | 'setPending' | 'setActive' | 'setLogging' | 'resting' | 'finished';
+type SessionPhase = 'exerciseReady' | 'setPending' | 'setActive' | 'setLogging' | 'resting' | 'exerciseComplete' | 'finished';
 type WorkoutExercise = RoutineExercise & { restSec: number };
 
 interface ExerciseEditDraft {
@@ -39,6 +47,10 @@ interface ExerciseEditDraft {
   kind: ExerciseKind;
   sets: RoutineSet[];
   restSec: number;
+}
+
+function blankWorkoutExercise(): ExerciseEditDraft {
+  return { id: makeId(), name: '', kind: 'reps', sets: [], restSec: REST_SECONDS };
 }
 
 interface SessionPR {
@@ -203,6 +215,7 @@ export default function ActiveWorkoutScreen() {
   const [weight, setWeight] = useState(routine?.exercises[0]?.sets[0]?.weight ?? 0);
   const [durationSec, setDurationSec] = useState(routine?.exercises[0]?.sets[0]?.durationSec ?? 45);
   const [editingDraft, setEditingDraft] = useState<ExerciseEditDraft | null>(null);
+  const [isAddingExercise, setIsAddingExercise] = useState(false);
   const [finishedSession, setFinishedSession] = useState<Session | null>(null);
   const [sessionPRs, setSessionPRs] = useState<SessionPR[]>([]);
   const [phaseEndsAt, setPhaseEndsAt] = useState<number | null>(null);
@@ -214,6 +227,9 @@ export default function ActiveWorkoutScreen() {
   const [targetPrompt, setTargetPrompt] = useState<TargetUpdatePrompt | null>(null);
   const pendingAdvanceRef = useRef<(() => void) | null>(null);
   const pendingTargetPromptRef = useRef<TargetUpdatePrompt | null>(null);
+  // Picked in the event handler that triggers the exercise-complete phase
+  // (see `completeSet`), not during render — `Math.random` is an impure call
+  // components/hooks aren't allowed to make while rendering.
 
   useEffect(() => {
     if (startedAt === null || phase === 'finished') return;
@@ -447,8 +463,8 @@ export default function ActiveWorkoutScreen() {
         finishWorkout(next);
       } else if (isLastSet) {
         // Last set of a non-final exercise: skip the rest countdown entirely
-        // and go straight to the next-exercise queue screen.
-        advanceToNextExercise(next);
+        // and show the exercise-complete beat before the next-exercise queue.
+        setPhase('exerciseComplete');
       } else {
         const restSec = exercise.restSec;
         setPhaseEndsAt(() => Date.now() + restSec * 1000);
@@ -629,6 +645,23 @@ export default function ActiveWorkoutScreen() {
     });
   };
 
+  /** Removes an upcoming (not-yet-started) exercise from the queue. If it was the one "up next," the exercise sliding into that slot needs fresh set-1 targets loaded. */
+  const removeExercise = (itemId: string) => {
+    const targetIndex = order.findIndex((item) => item.id === itemId);
+    if (targetIndex < exerciseIndex) return;
+    const nextOrder = order.filter((item) => item.id !== itemId);
+    setOrder(nextOrder);
+    if (targetIndex === exerciseIndex) {
+      setSetIndex(0);
+      const target = nextOrder[exerciseIndex]?.sets[0];
+      if (target) {
+        setReps(target.reps ?? 0);
+        setWeight(target.weight ?? 0);
+        setDurationSec(target.durationSec ?? 0);
+      }
+    }
+  };
+
   const beginEdit = (item: WorkoutExercise) => {
     setEditingDraft({
       id: item.id,
@@ -637,6 +670,16 @@ export default function ActiveWorkoutScreen() {
       sets: item.sets.map((set) => ({ ...set })),
       restSec: item.restSec,
     });
+  };
+
+  const beginAddExercise = () => {
+    setIsAddingExercise(true);
+    setEditingDraft(blankWorkoutExercise());
+  };
+
+  const cancelEditingDraft = () => {
+    setEditingDraft(null);
+    setIsAddingExercise(false);
   };
 
   const patchEditingDraft = (patch: Partial<ExerciseEditDraft>) => {
@@ -652,8 +695,16 @@ export default function ActiveWorkoutScreen() {
       kind: editingDraft.kind,
       sets: editingDraft.sets,
       restSec: editingDraft.restSec,
-      lastTime: order.find((item) => item.id === editingDraft.id)?.lastTime ?? null,
+      lastTime: isAddingExercise ? null : (order.find((item) => item.id === editingDraft.id)?.lastTime ?? null),
     };
+
+    if (isAddingExercise) {
+      haptics.selection();
+      setOrder((current) => [...current, nextExercise]);
+      setEditingDraft(null);
+      setIsAddingExercise(false);
+      return;
+    }
 
     setOrder((current) => current.map((item) => (item.id === editingDraft.id ? nextExercise : item)));
     if (exercise.id === editingDraft.id) {
@@ -767,6 +818,133 @@ export default function ActiveWorkoutScreen() {
     );
   }
 
+  if (phase === 'exerciseComplete') {
+    const completedItem = logged.find((item) => item.exerciseId === exercise.id);
+    const loggedSets = completedItem?.sets ?? [];
+    const workingSets = loggedSets.filter((set) => !set.skipped && !set.isWarmup);
+    const completedCount = loggedSets.filter((set) => !set.skipped).length;
+    // Warm-ups are excluded so the total is comparable with `lastExercisePerformance`,
+    // which drops them too — and so a long warm-up ramp can't inflate the number.
+    const exerciseVolume = workingSets.reduce((sum, set) => sum + (set.reps ?? 0) * (set.weight ?? 0), 0);
+    const heldSec = workingSets.reduce((sum, set) => sum + (set.durationSec ?? 0), 0);
+    const priorPR = exercisePR(sessions, exercise.name);
+    const bestThisExercise = sessionBestSet(logged, exercise.name);
+    const hitPR = !!bestThisExercise && beatsRecord(bestThisExercise.weight, bestThisExercise.reps, priorPR);
+    const topSet = headlineSet(exerciseKind, loggedSets);
+    const lastTime = lastExercisePerformance(sessions, exercise.name);
+    const lastVolume = lastTime
+      ? lastTime.sets.reduce((sum, set) => sum + (set.reps ?? 0) * (set.weight ?? 0), 0)
+      : 0;
+    const volumeDelta = exerciseVolume > 0 && lastVolume > 0 ? exerciseVolume - lastVolume : 0;
+    const lastTopSet = lastTime ? headlineSet(exerciseKind, lastTime.sets) : null;
+
+    // One yardstick under the headline, best available first: the record this
+    // just broke, the record it didn't, then simply what happened last time.
+    const yardstick = hitPR
+      ? priorPR
+        ? `Old best ${formatSetLog('reps', priorPR, unitSystem)}`
+        : 'First time on record'
+      : priorPR
+        ? `Best ${formatSetLog('reps', priorPR, unitSystem)}`
+        : lastTopSet
+          ? `Last time ${formatSetCompact(exerciseKind, lastTopSet, unitSystem)}`
+          : null;
+
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.topRow}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
+              {routine.name}
+            </ThemedText>
+            <Pressable onPress={confirmEnd} hitSlop={12}>
+              <ThemedText type="small" themeColor="textSecondary">
+                End
+              </ThemedText>
+            </Pressable>
+          </View>
+
+          <View style={styles.scoreHeader}>
+            {hitPR && (
+              <View style={styles.prBadge}>
+                <View style={styles.prBadgeRule} />
+                <ThemedText type="label" themeColor="primary">
+                  NEW PR
+                </ThemedText>
+              </View>
+            )}
+            <ThemedText type="label" themeColor="textSecondary" numberOfLines={2}>
+              {headlineLabel(exerciseKind, topSet)} · {exercise.name.toUpperCase()}
+            </ThemedText>
+            {topSet ? (
+              <TopSetValue kind={exerciseKind} set={topSet} unitSystem={unitSystem} />
+            ) : (
+              <ThemedText type="statLarge">—</ThemedText>
+            )}
+            {yardstick ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                {yardstick}
+              </ThemedText>
+            ) : null}
+          </View>
+
+          <ScrollView style={styles.flex} contentContainerStyle={styles.finishedContent} showsVerticalScrollIndicator={false}>
+            <ThemedView type="surface" style={styles.scorecard}>
+              <View style={styles.scoreRow}>
+                <ThemedText type="label" themeColor="textSecondary" style={styles.scoreSetCol}>
+                  SET
+                </ThemedText>
+                <ThemedText type="label" themeColor="textSecondary" style={styles.scorePlanCol}>
+                  PLANNED
+                </ThemedText>
+                <ThemedText type="label" themeColor="textSecondary" style={styles.scoreDoneHeader}>
+                  DONE
+                </ThemedText>
+              </View>
+              {loggedSets.map((set, index) => (
+                <ScorecardRow
+                  key={index}
+                  label={shortSetLabel(loggedSets, index)}
+                  planned={exercise.sets[index]}
+                  set={set}
+                  kind={exerciseKind}
+                  unitSystem={unitSystem}
+                />
+              ))}
+            </ThemedView>
+
+            <View style={styles.summaryRow}>
+              <SummaryStat value={`${completedCount}/${plannedSetCount}`} unit="sets" label="Completed" />
+              {exerciseKind === 'time'
+                ? heldSec > 0 && <SummaryStat value={formatDuration(heldSec)} unit="" label="Time under load" />
+                : exerciseVolume > 0 && (
+                    <SummaryStat
+                      animatedValue={Math.round(toDisplayWeight(exerciseVolume, unitSystem))}
+                      unit={weightUnitLabel(unitSystem)}
+                      label="Volume"
+                    />
+                  )}
+              {volumeDelta !== 0 && (
+                <SummaryStat
+                  value={`${volumeDelta > 0 ? '+' : '−'}${Math.round(Math.abs(toDisplayWeight(volumeDelta, unitSystem)))}`}
+                  unit={weightUnitLabel(unitSystem)}
+                  label="vs last time"
+                  valueColor={volumeDelta > 0 ? 'primary' : undefined}
+                />
+              )}
+            </View>
+          </ScrollView>
+
+          <Pressable style={styles.primaryButton} onPress={() => advanceToNextExercise(logged)}>
+            <ThemedText type="smallBold" style={styles.primaryButtonText}>
+              {isLastExercise ? 'Finish workout' : 'Next exercise'}
+            </ThemedText>
+          </Pressable>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   if (phase === 'exerciseReady') {
     const movable = order.slice(exerciseIndex);
 
@@ -810,12 +988,19 @@ export default function ActiveWorkoutScreen() {
                     active={absoluteIndex === exerciseIndex}
                     editing={editingDraft?.id === item.id}
                     onBeginEdit={() => beginEdit(item)}
+                    onDelete={movable.length > 1 ? () => removeExercise(item.id) : undefined}
                     unitSystem={unitSystem}
                     dragHandle={dragHandle}
                   />
                 );
               }}
             />
+            <Pressable style={styles.addExerciseRow} onPress={beginAddExercise}>
+              <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
+              <ThemedText type="small" style={{ color: colors.primaryLight }}>
+                Add exercise
+              </ThemedText>
+            </Pressable>
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={startExercise}>
@@ -829,13 +1014,14 @@ export default function ActiveWorkoutScreen() {
           visible={editingDraft !== null}
           animationType="slide"
           presentationStyle="fullScreen"
-          onRequestClose={() => setEditingDraft(null)}>
+          onRequestClose={cancelEditingDraft}>
           {editingDraft && (
             <ExerciseEditModal
               draft={editingDraft}
+              title={isAddingExercise ? 'Add Exercise' : 'Edit Exercise'}
               unitSystem={unitSystem}
               onChangeDraft={patchEditingDraft}
-              onCancel={() => setEditingDraft(null)}
+              onCancel={cancelEditingDraft}
               onSave={saveExerciseEdit}
             />
           )}
@@ -916,7 +1102,7 @@ export default function ActiveWorkoutScreen() {
                 value={reps}
                 targetValue={activeSet?.reps}
                 min={1}
-                max={Math.max((activeSet?.reps ?? 0) * 2, 20)}
+                max={MAX_REPS}
                 step={1}
                 onChange={setReps}
               />
@@ -926,7 +1112,7 @@ export default function ActiveWorkoutScreen() {
                 unit={weightUnitLabel(unitSystem)}
                 targetValue={activeSet ? toDisplayWeight(activeSet.weight ?? 0, unitSystem) : undefined}
                 min={0}
-                max={Math.max(toDisplayWeight(activeSet?.weight ?? 0, unitSystem) * 2, unitSystem === 'metric' ? 45 : 100)}
+                max={MAX_WEIGHT[unitSystem]}
                 step={unitSystem === 'metric' ? 1 : 2.5}
                 onChange={(displayValue) => setWeight(fromDisplayWeight(displayValue, unitSystem))}
               />
@@ -1230,6 +1416,7 @@ function EditableExerciseRow({
   active,
   editing,
   onBeginEdit,
+  onDelete,
   unitSystem,
   dragHandle,
 }: {
@@ -1238,10 +1425,12 @@ function EditableExerciseRow({
   active: boolean;
   editing: boolean;
   onBeginEdit: () => void;
+  /** Omitted for the last remaining exercise in the queue — leaves nothing to advance into. */
+  onDelete?: () => void;
   unitSystem: UnitSystem;
   dragHandle: ReactNode;
 }) {
-  return (
+  const row = (
     <View style={styles.editRow}>
       <ExerciseStatusRow item={item} index={index} status={active ? 'current' : 'upcoming'} unitSystem={unitSystem} />
       <Pressable hitSlop={8} onPress={onBeginEdit}>
@@ -1250,16 +1439,19 @@ function EditableExerciseRow({
       {dragHandle}
     </View>
   );
+  return onDelete ? <SwipeToDelete onDelete={onDelete}>{row}</SwipeToDelete> : row;
 }
 
 function ExerciseEditModal({
   draft,
+  title,
   unitSystem,
   onChangeDraft,
   onCancel,
   onSave,
 }: {
   draft: ExerciseEditDraft;
+  title: string;
   unitSystem: UnitSystem;
   onChangeDraft: (patch: Partial<ExerciseEditDraft>) => void;
   onCancel: () => void;
@@ -1276,7 +1468,7 @@ function ExerciseEditModal({
                 Cancel
               </ThemedText>
             </Pressable>
-            <ThemedText type="smallBold">Edit Exercise</ThemedText>
+            <ThemedText type="smallBold">{title}</ThemedText>
             <Pressable onPress={onSave} hitSlop={12} disabled={!canSave}>
               <ThemedText type="link" style={{ color: colors.primaryLight, opacity: canSave ? 1 : 0.4 }}>
                 Save
@@ -1463,11 +1655,28 @@ function SetLogCard({
   }, [editing]);
 
   const commitDraft = () => {
-    const parsed = Number(draft);
-    if (Number.isFinite(parsed)) {
+    pushDraft(draft);
+    setEditing(false);
+  };
+
+  /**
+   * Every parseable keystroke goes straight up, rather than waiting for blur.
+   * "Log Set" reads the weight captured in its own render, so a value typed
+   * and then logged in one tap used to be dropped entirely: the set logged the
+   * old target and a genuine PR never fired. Typing is also the only practical
+   * way to make a big jump (2.5 lb a tap), so this is the common path, not an
+   * edge case.
+   */
+  const pushDraft = (text: string) => {
+    const parsed = Number(text);
+    if (text.trim() !== '' && Number.isFinite(parsed)) {
       onChange(clampToStep(parsed, min, max, step));
     }
-    setEditing(false);
+  };
+
+  const editDraft = (text: string) => {
+    setDraft(text);
+    pushDraft(text);
   };
 
   const changeBy = (delta: number) => {
@@ -1501,7 +1710,7 @@ function SetLogCard({
           ref={inputRef}
           style={styles.setLogValueInput}
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={editDraft}
           onBlur={commitDraft}
           onSubmitEditing={commitDraft}
           keyboardType="decimal-pad"
@@ -1544,6 +1753,136 @@ function SetLogCard({
  * exercise, which used to make this render as a duration instead of reps ×
  * weight.
  */
+/**
+ * Compact "8 × 135" / "12 reps" / "0:45" for the scorecard's value columns —
+ * the weight unit is carried once by the headline instead of repeating in
+ * every cell, which is what keeps planned and done readable side by side.
+ */
+function formatSetCompact(
+  kind: ExerciseKind,
+  set: { reps?: number; weight?: number; durationSec?: number },
+  unitSystem: UnitSystem,
+): string {
+  if (kind === 'time') return formatDuration(set.durationSec ?? 0);
+  const reps = set.reps ?? 0;
+  return set.weight ? `${reps} × ${toDisplayWeight(set.weight, unitSystem)}` : `${reps} reps`;
+}
+
+/**
+ * The set the scorecard headlines: the heaviest working set, or — with no
+ * weight to rank by — the longest hold or the most reps. Weight-primary and
+ * reps-as-tiebreaker, same ordering as `beatsRecord`, so the headline and the
+ * PR affordances never disagree about which set was the best one.
+ */
+function headlineSet(kind: ExerciseKind, sets: SetLog[]): SetLog | null {
+  const working = sets.filter((set) => !set.skipped && !set.isWarmup);
+  if (working.length === 0) return null;
+  if (kind === 'time') {
+    return working.reduce((best, set) => ((set.durationSec ?? 0) > (best.durationSec ?? 0) ? set : best));
+  }
+  const weighted = working.filter((set) => (set.weight ?? 0) > 0);
+  if (weighted.length === 0) return working.reduce((best, set) => ((set.reps ?? 0) > (best.reps ?? 0) ? set : best));
+  return weighted.reduce((best, set) =>
+    beatsRecord(set.weight!, set.reps, { weight: best.weight!, reps: best.reps }) ? set : best,
+  );
+}
+
+function headlineLabel(kind: ExerciseKind, set: SetLog | null): string {
+  if (kind === 'time') return 'LONGEST SET';
+  return set?.weight ? 'TOP SET' : 'BEST SET';
+}
+
+/** "Set 2" / "Warm-up 1" — numbered among sets carrying the same flag, so a warm-up ramp doesn't shift the working-set numbers. */
+function shortSetLabel(sets: { isWarmup?: boolean }[], index: number): string {
+  const current = sets[index];
+  const position = sets.slice(0, index + 1).filter((set) => !!set.isWarmup === !!current?.isWarmup).length;
+  return current?.isWarmup ? `Warm-up ${position}` : `Set ${position}`;
+}
+
+type SetOutcome = 'beat' | 'met' | 'under' | 'skipped';
+
+/**
+ * How a logged set landed against the set planned in its slot. Weight-primary
+ * like `beatsRecord`, so trading reps for a heavier bar still reads as a win.
+ */
+function compareToPlan(kind: ExerciseKind, planned: RoutineSet | undefined, done: SetLog): SetOutcome {
+  if (done.skipped) return 'skipped';
+  if (!planned) return 'met';
+  if (kind === 'time') {
+    const target = planned.durationSec ?? 0;
+    const actual = done.durationSec ?? 0;
+    if (actual === target) return 'met';
+    return actual > target ? 'beat' : 'under';
+  }
+  const targetWeight = planned.weight ?? 0;
+  const actualWeight = done.weight ?? 0;
+  if (actualWeight !== targetWeight) return actualWeight > targetWeight ? 'beat' : 'under';
+  const targetReps = planned.reps ?? 0;
+  const actualReps = done.reps ?? 0;
+  if (actualReps !== targetReps) return actualReps > targetReps ? 'beat' : 'under';
+  return 'met';
+}
+
+/** The between-exercises headline: the best set of the movement just finished. */
+function TopSetValue({ kind, set, unitSystem }: { kind: ExerciseKind; set: SetLog; unitSystem: UnitSystem }) {
+  if (kind === 'time') return <ThemedText type="statLarge">{formatDuration(set.durationSec ?? 0)}</ThemedText>;
+  if (!set.weight) {
+    return (
+      <ThemedText type="statLarge">
+        {set.reps ?? 0}
+        <ThemedText type="small"> reps</ThemedText>
+      </ThemedText>
+    );
+  }
+  return (
+    <ThemedText type="statLarge">
+      {toDisplayWeight(set.weight, unitSystem)}
+      <ThemedText type="small"> {weightUnitLabel(unitSystem)}</ThemedText>
+      {` × ${set.reps ?? 0}`}
+    </ThemedText>
+  );
+}
+
+/** One scorecard row: what was planned, what actually happened, and which way it went. */
+function ScorecardRow({
+  label,
+  planned,
+  set,
+  kind,
+  unitSystem,
+}: {
+  label: string;
+  planned: RoutineSet | undefined;
+  set: SetLog;
+  kind: ExerciseKind;
+  unitSystem: UnitSystem;
+}) {
+  const outcome = compareToPlan(kind, planned, set);
+  return (
+    <View style={styles.scoreRow}>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.scoreSetCol}>
+        {label}
+      </ThemedText>
+      <ThemedText type="statInline" themeColor="textSecondary" style={styles.scorePlanCol}>
+        {planned ? formatSetCompact(kind, planned, unitSystem) : '—'}
+      </ThemedText>
+      <View style={styles.scoreDoneCol}>
+        {outcome === 'beat' ? <SymbolView name="arrow.up" size={11} tintColor={colors.primary} /> : null}
+        {outcome === 'under' ? <SymbolView name="arrow.down" size={11} tintColor={colors.textSecondary} /> : null}
+        {outcome === 'skipped' ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            Skipped
+          </ThemedText>
+        ) : (
+          <ThemedText type="statInline" themeColor={outcome === 'beat' ? 'primary' : 'text'}>
+            {formatSetCompact(kind, set, unitSystem)}
+          </ThemedText>
+        )}
+      </View>
+    </View>
+  );
+}
+
 function formatSetLog(kind: ExerciseKind, set: { reps?: number; weight?: number; durationSec?: number }, unitSystem: UnitSystem): string {
   if (kind === 'time') return formatDuration(set.durationSec ?? 0);
   const weightLabel = set.weight ? ` × ${toDisplayWeight(set.weight, unitSystem)} ${weightUnitLabel(unitSystem)}` : '';
@@ -1820,6 +2159,45 @@ const styles = StyleSheet.create({
   finishedHeader: {
     gap: Spacing.one,
     alignItems: 'flex-start',
+  },
+  scoreHeader: {
+    gap: Spacing.one,
+    alignItems: 'flex-start',
+  },
+  scorecard: {
+    borderRadius: Radius.lg,
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  scoreSetCol: {
+    flex: 1,
+  },
+  scorePlanCol: {
+    width: 84,
+    textAlign: 'right',
+  },
+  scoreDoneHeader: {
+    width: 96,
+    textAlign: 'right',
+  },
+  scoreDoneCol: {
+    width: 96,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: Spacing.half,
+  },
+  addExerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
   },
   finishedContent: {
     gap: Spacing.four,

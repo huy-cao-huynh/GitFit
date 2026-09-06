@@ -249,6 +249,15 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * The two pills swap fills on press rather than tinting: lime and white are
+ * each other's pressed state, so exactly one pill is lime at any moment.
+ */
+function fillFor(variant: 'primary' | 'google', pressed: boolean) {
+  const lime = variant === 'primary' ? !pressed : pressed;
+  return lime ? styles.fillLime : styles.fillWhite;
+}
+
 function PillButton({
   label,
   onPress,
@@ -271,16 +280,17 @@ function PillButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.pill,
-        variant === 'primary' ? styles.pillPrimary : styles.pillGoogle,
-        pressed && styles.pillPressed,
+        fillFor(variant, pressed),
         disabled && styles.disabled,
       ]}>
       {loading ? (
-        <ActivityIndicator color={theme.text} />
+        <ActivityIndicator color={theme.onPrimary} />
       ) : (
         <>
           {icon}
-          <ThemedText>{label}</ThemedText>
+          <ThemedText type="button" themeColor="onPrimary">
+            {label}
+          </ThemedText>
         </>
       )}
     </Pressable>
@@ -305,21 +315,18 @@ const styles = StyleSheet.create({
   },
   birthdayBox: { alignItems: 'flex-start' },
   changeEmail: { alignSelf: 'flex-start', marginTop: -Spacing.two },
+  // Filled, so no stroke: the fill is what defines the pill. Both fills are
+  // light, so `onPrimary` is the correct content colour on either one.
   pill: {
     borderRadius: Radius.full,
-    borderWidth: 1,
-    paddingVertical: Spacing.two,
+    paddingVertical: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.two,
-    backgroundColor: 'transparent',
   },
-  pillPrimary: { borderColor: Colors.text },
-  pillGoogle: { borderColor: Colors.text },
-  // Tint rather than a full lime fill: these pills keep light text, which a
-  // solid lime background would make unreadable.
-  pillPressed: { borderColor: Colors.primary, backgroundColor: Colors.primaryTint },
+  fillLime: { backgroundColor: Colors.primary },
+  fillWhite: { backgroundColor: Colors.text },
   divider: { textAlign: 'center' },
   disabled: { opacity: 0.5 },
   error: { color: Colors.danger, textAlign: 'center' },
