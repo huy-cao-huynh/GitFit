@@ -36,6 +36,7 @@ interface StoreValue extends StoreData {
   deleteRoutine: (id: string) => void;
   addSession: (session: Session) => void;
   addCardioSession: (session: CardioSession) => void;
+  updateCardioSession: (session: CardioSession) => void;
   setGoals: (goals: Goals) => void;
   addGoalEntry: (entry: GoalEntry) => void;
   setCheckoffDefs: (defs: CheckoffDef[]) => void;
@@ -71,6 +72,7 @@ const EMPTY: StoreData = {
   recipes: [],
   nutritionGoals: null,
   preferences: seedPreferences,
+  stravaActivities: [],
 };
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -160,6 +162,12 @@ export function StoreProvider({ children }: PropsWithChildren) {
       addCardioSession: (session) => {
         apply('cardioSessions', (cardioSessions) => [session, ...cardioSessions]);
         persist('cardio session', remote.insertCardioSession(session));
+      },
+      updateCardioSession: (session) => {
+        apply('cardioSessions', (cardioSessions) =>
+          cardioSessions.map((existing) => (existing.id === session.id ? session : existing)),
+        );
+        persist('cardio session update', remote.updateCardioSession(session));
       },
       setGoals: (goals) => {
         apply('goals', () => goals);

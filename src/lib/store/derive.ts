@@ -24,6 +24,7 @@ import type {
   SessionExercise,
   SetLog,
   StepsEntry,
+  StravaActivityLink,
   UnitSystem,
   WaterEntry,
   Weekday,
@@ -896,6 +897,23 @@ export function lastCardioPerformance(
 ): { date: string; minutes: number; distanceMiles?: number } | null {
   const match = cardioSessions.find((session) => session.routineId === routineId);
   return match ? { date: match.date, minutes: match.minutes, distanceMiles: match.distanceMiles } : null;
+}
+
+/**
+ * Finds the Strava provenance/sync link for one GitFit activity, if any --
+ * import (this session came from Strava) or export (this session was
+ * uploaded to Strava). Cardio/strength screens use this to render "Imported
+ * from Strava" badges and upload status without cardio_sessions/sessions
+ * needing any Strava-specific columns of their own.
+ */
+export function stravaLinkFor(
+  stravaActivities: StravaActivityLink[],
+  gitfitActivityType: StravaActivityLink['gitfitActivityType'],
+  gitfitActivityId: string,
+): StravaActivityLink | undefined {
+  return stravaActivities.find(
+    (link) => link.gitfitActivityType === gitfitActivityType && link.gitfitActivityId === gitfitActivityId,
+  );
 }
 
 /** Longest distance ever logged for this routine, with the date it happened. Mirrors `exercisePR`'s shape. */

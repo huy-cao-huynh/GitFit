@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardioSummary } from '@/components/cardio-summary';
 import { ElevationProfile } from '@/components/elevation-profile';
+import { StravaUploadPrompt } from '@/components/strava-upload-prompt';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TimerText } from '@/components/timer-text';
@@ -225,6 +226,8 @@ export default function CardioSessionScreen() {
             </View>
 
             <CardioSummary animated session={session} unitSystem={unitSystem} />
+
+            <StravaUploadPrompt gitfitActivityType="cardio_session" gitfitActivityId={session.id} />
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>

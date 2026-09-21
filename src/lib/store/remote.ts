@@ -36,6 +36,7 @@ import type {
   SetLog,
   StepsEntry,
   StoreData,
+  StravaActivityLink,
   UnitSystem,
   WaterEntry,
   Weekday,
@@ -409,6 +410,26 @@ function mapRecipe(row: RecipeRow): Recipe {
   };
 }
 
+interface StravaActivityLinkRow {
+  strava_activity_id: number | null;
+  gitfit_activity_type: 'cardio_session' | 'session';
+  gitfit_activity_id: string;
+  direction: 'import' | 'export';
+  external_url: string | null;
+  upload_status: 'pending' | 'uploaded' | 'failed' | 'synced' | 'unlinked';
+}
+
+function mapStravaActivityLink(row: StravaActivityLinkRow): StravaActivityLink {
+  return {
+    stravaActivityId: row.strava_activity_id ?? undefined,
+    gitfitActivityType: row.gitfit_activity_type,
+    gitfitActivityId: row.gitfit_activity_id,
+    direction: row.direction,
+    externalUrl: row.external_url ?? undefined,
+    uploadStatus: row.upload_status,
+  };
+}
+
 function mapNutritionGoals(row: NutritionGoalsRow | null): NutritionGoals | null {
   if (!row) return null;
   return { calories: row.calories, proteinG: row.protein_g, carbsG: row.carbs_g, fatG: row.fat_g };
@@ -479,10 +500,31 @@ async function fetchGoalEntries(): Promise<GoalEntry[]> {
   }
 }
 
+/**
+ * strava_activities arrived in migration 0012; fetch it separately so a
+ * project that hasn't applied it yet degrades to no provenance links instead
+ * of failing hydration (same approach as fetchGoalEntries for migration 0006).
+ */
+async function fetchStravaActivities(): Promise<StravaActivityLink[]> {
+  try {
+    const rows = unwrap(
+      await supabase
+        .from('strava_activities')
+        .select('strava_activity_id, gitfit_activity_type, gitfit_activity_id, direction, external_url, upload_status')
+        .returns<StravaActivityLinkRow[]>(),
+    );
+    return rows.map(mapStravaActivityLink);
+  } catch (error) {
+    console.warn('Failed to fetch Strava activity links (migration 0012 applied?)', error);
+    return [];
+  }
+}
+
 /** Loads the user's entire store in parallel; throws on the first failure. */
 export async function fetchStoreData(): Promise<StoreData> {
   const nutritionPromise = fetchNutritionData();
   const goalEntriesPromise = fetchGoalEntries();
+  const stravaActivitiesPromise = fetchStravaActivities();
   const [
     profile,
     routines,
@@ -546,6 +588,7 @@ export async function fetchStoreData(): Promise<StoreData> {
     waterEntries: unwrap(waterEntries),
     measurementDefs: unwrap(measurementDefs).map(({ id, label, unit }) => ({ id, label, unit })),
     measurementEntries: unwrap(measurementEntries),
+    stravaActivities: await stravaActivitiesPromise,
     ...(await nutritionPromise),
     // The migration's trigger/backfill guarantees a profile row; fall back
     // to the default rather than failing hydration if it's somehow missing.
@@ -701,6 +744,31 @@ export async function insertCardioSession(session: CardioSession): Promise<void>
     elevation_gain_ft: session.elevationGainFt ?? null,
     avg_pace_sec_per_mile: session.avgPaceSecPerMile ?? null,
   });
+  throwIfError(error);
+}
+
+/**
+ * Cardio sessions were insert-only until the Strava integration: a session
+ * imported from Strava can later change on Strava's side (title, distance,
+ * route) and strava-webhook updates the row in place rather than the app, but
+ * a matching client-side updater is still needed for local state to reflect
+ * that update after the next hydration/refetch.
+ */
+export async function updateCardioSession(session: CardioSession): Promise<void> {
+  const { error } = await supabase
+    .from('cardio_sessions')
+    .update({
+      name: session.name,
+      activity_type: session.activityType,
+      date: session.date,
+      minutes: session.minutes,
+      distance_miles: session.distanceMiles ?? null,
+      calories: session.calories ?? null,
+      route: session.route ?? null,
+      elevation_gain_ft: session.elevationGainFt ?? null,
+      avg_pace_sec_per_mile: session.avgPaceSecPerMile ?? null,
+    })
+    .eq('id', session.id);
   throwIfError(error);
 }
 

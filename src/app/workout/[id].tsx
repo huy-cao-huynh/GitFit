@@ -10,6 +10,7 @@ import { ExerciseSetEditor } from '@/components/exercise-set-editor';
 import { MuscleDiagram } from '@/components/muscle-diagram';
 import { PRCelebration, type PRRecord } from '@/components/pr-celebration';
 import { SortableList } from '@/components/sortable-list';
+import { StravaUploadPrompt } from '@/components/strava-upload-prompt';
 import { SummaryStat } from '@/components/summary-stat';
 import { SwipeToDelete } from '@/components/swipe-to-delete';
 import { ThemedText } from '@/components/themed-text';
@@ -806,6 +807,8 @@ export default function ActiveWorkoutScreen() {
                 </ThemedView>
               ))}
             </View>
+
+            <StravaUploadPrompt gitfitActivityType="session" gitfitActivityId={session.id} />
           </ScrollView>
 
           <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>

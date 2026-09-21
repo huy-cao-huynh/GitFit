@@ -22,6 +22,7 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Colors, Radius, Spacing } from '@/constants/theme';
 import { authErrorMessage } from '@/lib/auth-errors';
 import { dateFromKey, toDateKey } from '@/lib/store/derive';
+import { useStravaConnection } from '@/lib/strava/use-strava-connection';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { formatHeight, fromDisplayLength, lengthUnitLabel, toDisplayLength } from '@/lib/units';
 import { useAuth } from '@/providers/auth-provider';
@@ -291,15 +292,21 @@ export default function SettingsScreen() {
               </ThemedView>
             </View>
 
-            <ThemedView type="surface" style={[styles.section, styles.row]}>
-              <View style={styles.rowText}>
-                <ThemedText type="smallBold">Apple Health</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  Coming soon — sync workouts and calories
-                </ThemedText>
-              </View>
-              <Switch value={false} disabled />
-            </ThemedView>
+            <View style={styles.connectedAppsSection}>
+              <ThemedText type="label" style={styles.sectionLabel}>
+                CONNECTED APPS
+              </ThemedText>
+              <StravaConnectionRow />
+              <ThemedView type="surface" style={[styles.section, styles.row]}>
+                <View style={styles.rowText}>
+                  <ThemedText type="smallBold">Apple Health</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Coming soon — sync workouts and calories
+                  </ThemedText>
+                </View>
+                <Switch value={false} disabled />
+              </ThemedView>
+            </View>
 
             {error && (
               <ThemedText type="small" style={styles.error}>
@@ -400,6 +407,40 @@ function UnitToggle({ value, onChange }: { value: UnitSystem; onChange: (value: 
         );
       })}
     </View>
+  );
+}
+
+/** "Connected Apps > Strava" row, following the Apple Health row's card shape but with a Connect/Disconnect action instead of a disabled Switch, since OAuth connect/disconnect isn't a simple toggle. */
+function StravaConnectionRow() {
+  const strava = useStravaConnection();
+  const [isBusy, setIsBusy] = useState(false);
+
+  const handleConnect = async () => {
+    setIsBusy(true);
+    await strava.connect();
+    setIsBusy(false);
+  };
+
+  const handleDisconnect = async () => {
+    setIsBusy(true);
+    await strava.disconnect();
+    setIsBusy(false);
+  };
+
+  return (
+    <ThemedView type="surface" style={[styles.section, styles.row]}>
+      <View style={styles.rowText}>
+        <ThemedText type="smallBold">Strava</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          {strava.connected ? 'Connected' : 'Connect your Strava account'}
+        </ThemedText>
+      </View>
+      <Pressable onPress={strava.connected ? handleDisconnect : handleConnect} disabled={isBusy || strava.isLoading} hitSlop={8}>
+        <ThemedText type="smallBold" themeColor={isBusy ? 'textMuted' : 'primary'}>
+          {strava.connected ? 'Disconnect' : 'Connect'}
+        </ThemedText>
+      </Pressable>
+    </ThemedView>
   );
 }
 
@@ -533,6 +574,9 @@ const styles = StyleSheet.create({
   sectionLabel: {
     textTransform: 'uppercase',
     marginBottom: Spacing.two,
+  },
+  connectedAppsSection: {
+    gap: Spacing.two,
   },
   unitToggle: {
     flexDirection: 'row',

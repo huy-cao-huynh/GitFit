@@ -233,6 +233,24 @@ export interface Recipe {
 /** Daily intake targets; null until the user sets them. */
 export type NutritionGoals = Macros;
 
+/**
+ * Read-only client view of a strava_activities row: links one GitFit activity
+ * (cardio or strength) to a Strava activity in one direction. Provenance and
+ * sync state live entirely here rather than as columns on CardioSession/
+ * Session, so both activity kinds share one mechanism (see
+ * supabase/migrations/0012_strava_integration.sql). All writes happen
+ * server-side (Edge Functions); the client only reads this to render
+ * "Imported from Strava" badges/links and upload status.
+ */
+export interface StravaActivityLink {
+  stravaActivityId?: number;
+  gitfitActivityType: 'cardio_session' | 'session';
+  gitfitActivityId: string;
+  direction: 'import' | 'export';
+  externalUrl?: string;
+  uploadStatus: 'pending' | 'uploaded' | 'failed' | 'synced' | 'unlinked';
+}
+
 export interface ProgressPoint {
   date: string;
   value: number;
@@ -262,4 +280,5 @@ export interface StoreData {
   recipes: Recipe[];
   nutritionGoals: NutritionGoals | null;
   preferences: Preferences;
+  stravaActivities: StravaActivityLink[];
 }

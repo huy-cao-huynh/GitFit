@@ -4,9 +4,11 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardioSummary } from '@/components/cardio-summary';
+import { StravaBadge } from '@/components/strava-badge';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS } from '@/lib/activity-icons';
+import { stravaLinkFor } from '@/lib/store/derive';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -21,7 +23,7 @@ function formatDate(iso: string) {
 
 export default function CardioHistoryDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { cardioSessions, preferences } = useStore();
+  const { cardioSessions, preferences, stravaActivities } = useStore();
   const session = cardioSessions.find((s) => s.id === id);
 
   if (!session) {
@@ -55,6 +57,8 @@ export default function CardioHistoryDetailScreen() {
             <SymbolView name={ACTIVITY_ICONS[session.activityType]} size={16} tintColor={colors.primaryLight} />
             <ThemedText type="subtitle">{session.name}</ThemedText>
           </View>
+
+          <StravaBadge link={stravaLinkFor(stravaActivities, 'cardio_session', session.id)} />
 
           <CardioSummary session={session} unitSystem={preferences.unitSystem} />
         </ScrollView>

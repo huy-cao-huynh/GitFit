@@ -371,6 +371,17 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# strava-oauth-callback and strava-webhook are called directly by Strava (no
+# Supabase session/JWT) -- without disabling JWT verification here, Supabase's
+# gateway rejects every call from Strava with 401 before the function code
+# ever runs. Every other Strava function is called by the app with a real
+# user session, so it keeps the default verify_jwt = true.
+[functions.strava-oauth-callback]
+verify_jwt = false
+
+[functions.strava-webhook]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
