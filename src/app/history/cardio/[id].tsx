@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardioSummary } from '@/components/cardio-summary';
 import { StravaBadge } from '@/components/strava-badge';
+import { StravaUploadButton } from '@/components/strava-upload-button';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
 import { ACTIVITY_ICONS } from '@/lib/activity-icons';
@@ -62,6 +63,8 @@ export default function CardioHistoryDetailScreen() {
 
           <CardioSummary session={session} unitSystem={preferences.unitSystem} />
         </ScrollView>
+
+        <StravaUploadButton gitfitActivityType="cardio_session" session={session} hideWhenDisconnected style={styles.footerButton} />
       </SafeAreaView>
     </View>
   );
@@ -92,6 +95,9 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.four,
     paddingBottom: Spacing.six,
+  },
+  footerButton: {
+    marginTop: Spacing.three,
   },
   titleRow: {
     flexDirection: 'row',

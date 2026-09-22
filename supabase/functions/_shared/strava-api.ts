@@ -164,13 +164,26 @@ export interface UploadResult {
   id: number; // the transient upload ticket id
 }
 
-export async function uploadGpxFile(
+/**
+ * POST /uploads with an activity file. GPX carries a recorded route; JSON is
+ * Strava's WeightTraining format carrying structured sets. Processing is
+ * async either way -- poll the returned ticket with pollUploadUntilResolved.
+ */
+export async function uploadActivityFile(
   accessToken: string,
-  params: { gpx: string; name: string; description?: string; sportType: string; externalId: string },
+  params: {
+    file: string;
+    dataType: 'gpx' | 'json';
+    name: string;
+    description?: string;
+    sportType: string;
+    externalId: string;
+  },
 ): Promise<UploadResult> {
+  const contentType = params.dataType === 'gpx' ? 'application/gpx+xml' : 'application/json';
   const form = new FormData();
-  form.set('file', new Blob([params.gpx], { type: 'application/gpx+xml' }), `${params.externalId}.gpx`);
-  form.set('data_type', 'gpx');
+  form.set('file', new Blob([params.file], { type: contentType }), `${params.externalId}.${params.dataType}`);
+  form.set('data_type', params.dataType);
   form.set('name', params.name);
   if (params.description) form.set('description', params.description);
   form.set('sport_type', params.sportType);
@@ -182,6 +195,14 @@ export async function uploadGpxFile(
     body: form,
   });
   return parseStravaResponse<UploadResult>(response);
+}
+
+export function uploadGpxFile(
+  accessToken: string,
+  params: { gpx: string; name: string; description?: string; sportType: string; externalId: string },
+): Promise<UploadResult> {
+  const { gpx, ...rest } = params;
+  return uploadActivityFile(accessToken, { ...rest, file: gpx, dataType: 'gpx' });
 }
 
 export interface UploadStatus {

@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardioSummary } from '@/components/cardio-summary';
 import { ElevationProfile } from '@/components/elevation-profile';
-import { StravaUploadPrompt } from '@/components/strava-upload-prompt';
+import { StravaUploadButton } from '@/components/strava-upload-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TimerText } from '@/components/timer-text';
@@ -226,15 +226,16 @@ export default function CardioSessionScreen() {
             </View>
 
             <CardioSummary animated session={session} unitSystem={unitSystem} />
-
-            <StravaUploadPrompt gitfitActivityType="cardio_session" gitfitActivityId={session.id} />
           </ScrollView>
 
-          <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
-            <ThemedText type="smallBold" style={styles.primaryButtonText}>
-              Return to Home
-            </ThemedText>
-          </Pressable>
+          <View style={styles.finishedFooter}>
+            <StravaUploadButton gitfitActivityType="cardio_session" session={session} />
+            <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
+              <ThemedText type="smallBold" style={styles.primaryButtonText}>
+                Return to Home
+              </ThemedText>
+            </Pressable>
+          </View>
         </SafeAreaView>
       </View>
     );
@@ -608,6 +609,9 @@ const styles = StyleSheet.create({
   finishedContent: {
     gap: Spacing.four,
     paddingBottom: Spacing.four,
+  },
+  finishedFooter: {
+    gap: Spacing.two,
   },
   finishedHeader: {
     gap: Spacing.one,

@@ -4,6 +4,7 @@
  * module or anywhere else in the app -- the authorize URL is composed
  * server-side by strava-oauth-start, and tokens never leave Edge Functions.
  */
+import type { UnitSystem } from '@/lib/store/types';
 import { supabase } from '@/lib/supabase';
 
 export interface StravaStatus {
@@ -54,9 +55,16 @@ export interface UploadResult {
 export async function uploadToStrava(params: {
   gitfitActivityType: UploadGitfitActivityType;
   gitfitActivityId: string;
+  /** The user's note; the server puts it above its generated description. */
   description?: string;
+  unitSystem: UnitSystem;
 }): Promise<UploadResult> {
-  const { data, error } = await supabase.functions.invoke<UploadResult>('strava-upload', { body: params });
+  // GitFit stores dates, not clock times, so the server needs the device's
+  // offset to place the workout in the right local day on Strava.
+  const utcOffsetSec = -new Date().getTimezoneOffset() * 60;
+  const { data, error } = await supabase.functions.invoke<UploadResult>('strava-upload', {
+    body: { ...params, utcOffsetSec },
+  });
   if (error) throw new Error(error.message);
   return data!;
 }

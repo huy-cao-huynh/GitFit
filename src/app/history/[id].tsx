@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
+import { StravaUploadButton } from '@/components/strava-upload-button';
 import { SummaryStat } from '@/components/summary-stat';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -67,6 +68,8 @@ export default function HistoryDetailScreen() {
             <ExerciseCard key={exercise.exerciseId} exercise={exercise} />
           ))}
         </ScrollView>
+
+        <StravaUploadButton gitfitActivityType="session" session={session} hideWhenDisconnected style={styles.footerButton} />
       </SafeAreaView>
     </View>
   );
@@ -134,6 +137,9 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.four,
     paddingBottom: Spacing.six,
+  },
+  footerButton: {
+    marginTop: Spacing.three,
   },
   summaryRow: {
     flexDirection: 'row',

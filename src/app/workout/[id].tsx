@@ -10,7 +10,7 @@ import { ExerciseSetEditor } from '@/components/exercise-set-editor';
 import { MuscleDiagram } from '@/components/muscle-diagram';
 import { PRCelebration, type PRRecord } from '@/components/pr-celebration';
 import { SortableList } from '@/components/sortable-list';
-import { StravaUploadPrompt } from '@/components/strava-upload-prompt';
+import { StravaUploadButton } from '@/components/strava-upload-button';
 import { SummaryStat } from '@/components/summary-stat';
 import { SwipeToDelete } from '@/components/swipe-to-delete';
 import { ThemedText } from '@/components/themed-text';
@@ -807,15 +807,16 @@ export default function ActiveWorkoutScreen() {
                 </ThemedView>
               ))}
             </View>
-
-            <StravaUploadPrompt gitfitActivityType="session" gitfitActivityId={session.id} />
           </ScrollView>
 
-          <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
-            <ThemedText type="smallBold" style={styles.primaryButtonText}>
-              Return to Home
-            </ThemedText>
-          </Pressable>
+          <View style={styles.finishedFooter}>
+            <StravaUploadButton gitfitActivityType="session" session={session} />
+            <Pressable style={styles.primaryButton} onPress={() => router.dismissTo('/dashboard')}>
+              <ThemedText type="smallBold" style={styles.primaryButtonText}>
+                Return to Home
+              </ThemedText>
+            </Pressable>
+          </View>
         </SafeAreaView>
       </View>
     );
@@ -2201,6 +2202,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.two,
     paddingVertical: Spacing.three,
+  },
+  finishedFooter: {
+    gap: Spacing.two,
   },
   finishedContent: {
     gap: Spacing.four,

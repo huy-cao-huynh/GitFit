@@ -25,6 +25,7 @@ import type {
   Routine,
   Session,
   StoreData,
+  StravaActivityLink,
   WaterEntry,
 } from '@/lib/store/types';
 import { useAuth } from '@/providers/auth-provider';
@@ -53,6 +54,11 @@ interface StoreValue extends StoreData {
   deleteRecipe: (id: string) => void;
   setNutritionGoals: (goals: NutritionGoals) => void;
   setPreferences: (preferences: Preferences) => void;
+  /**
+   * Mirrors a successful upload into the in-memory link list. In-memory only:
+   * the strava-upload Edge Function already wrote the row server-side.
+   */
+  recordStravaExport: (link: StravaActivityLink) => void;
 }
 
 const EMPTY: StoreData = {
@@ -154,6 +160,19 @@ export function StoreProvider({ children }: PropsWithChildren) {
       deleteRoutine: (id) => {
         apply('routines', (routines) => routines.filter((r) => r.id !== id));
         persist('routine delete', remote.deleteRoutine(id));
+      },
+      recordStravaExport: (link) => {
+        apply('stravaActivities', (links) => [
+          link,
+          ...links.filter(
+            (existing) =>
+              !(
+                existing.direction === link.direction &&
+                existing.gitfitActivityType === link.gitfitActivityType &&
+                existing.gitfitActivityId === link.gitfitActivityId
+              ),
+          ),
+        ]);
       },
       addSession: (session) => {
         apply('sessions', (sessions) => [session, ...sessions]);
