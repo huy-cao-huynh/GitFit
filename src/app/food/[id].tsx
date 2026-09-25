@@ -8,14 +8,13 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { haptics } from '@/lib/haptics';
-import { MEAL_LABELS, MEAL_ORDER, scaleMacros } from '@/lib/store/derive';
-import type { MealType } from '@/lib/store/types';
+import { scaleMacros } from '@/lib/store/derive';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
 
 /**
- * Edit a logged food: change the meal, rescale the amount (macros scale
+ * Edit a logged food: rescale the amount (macros scale
  * proportionally from the logged snapshot), or delete the entry.
  */
 export default function FoodEntryScreen() {
@@ -23,7 +22,6 @@ export default function FoodEntryScreen() {
   const { foodLogs, updateFoodLog, deleteFoodLog } = useStore();
   const entry = foodLogs.find((candidate) => candidate.id === id);
 
-  const [meal, setMeal] = useState<MealType>(entry?.meal ?? 'breakfast');
   const [gramsText, setGramsText] = useState(
     entry?.grams !== undefined ? String(Math.round(entry.grams * 10) / 10) : '',
   );
@@ -54,7 +52,6 @@ export default function FoodEntryScreen() {
     haptics.impact();
     updateFoodLog({
       ...entry,
-      meal,
       grams: entry.grams !== undefined ? grams : undefined,
       ...scaled,
     });
@@ -93,22 +90,6 @@ export default function FoodEntryScreen() {
               Save
             </ThemedText>
           </Pressable>
-        </View>
-
-        <View style={styles.mealChips}>
-          {MEAL_ORDER.map((option) => {
-            const active = meal === option;
-            return (
-              <Pressable
-                key={option}
-                style={[styles.mealChip, active && styles.mealChipActive]}
-                onPress={() => setMeal(option)}>
-                <ThemedText type="small" themeColor={active ? 'onPrimary' : 'textSecondary'}>
-                  {MEAL_LABELS[option]}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
         </View>
 
         <ThemedView type="surface" style={styles.card}>
@@ -195,22 +176,6 @@ const styles = StyleSheet.create({
   },
   disabledLink: {
     opacity: 0.4,
-  },
-  mealChips: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  mealChip: {
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.one,
-    borderRadius: Radius.full,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  mealChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: 'transparent',
   },
   card: {
     borderRadius: Radius.lg,

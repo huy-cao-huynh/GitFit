@@ -3,6 +3,7 @@ import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   LayoutChangeEvent,
   Platform,
@@ -17,6 +18,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TimeField } from '@/components/time-field';
 import { Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
 import { haptics } from '@/lib/haptics';
 import { searchFoods } from '@/lib/nutrition/usda-food-data-central';
@@ -28,16 +30,20 @@ import {
   type FoodSearchResult,
 } from '@/lib/nutrition/units';
 import {
-  MEAL_LABELS,
-  MEAL_ORDER,
+  addMacros,
+  defaultTimeOnDate,
+  EMPTY_MACROS,
+  formatClock,
+  mealEventTitle,
   recentFoods,
   recipePerServing,
   scaleMacros,
+  suggestMealTitle,
   todayKey,
   type RecentFood,
 } from '@/lib/store/derive';
 import { makeId } from '@/lib/store/id';
-import type { Macros, MealType, Recipe } from '@/lib/store/types';
+import type { FoodLogEntry, Macros, Recipe } from '@/lib/store/types';
 import { useStore } from '@/providers/store-provider';
 
 const colors = Colors;
@@ -55,18 +61,26 @@ type AmountFood = Pick<
   'name' | 'brand' | 'servingSize' | 'caloriesPer100g' | 'proteinPer100g' | 'carbsPer100g' | 'fatPer100g'
 >;
 
+/** A food picked in this visit, waiting in the basket to be logged with the rest. */
+type BasketItem = Omit<FoodLogEntry, 'date' | 'eventId'>;
+
 /** Either a weight-based food (search result / recent food, scales by grams) or a recipe (scales by serving count). */
 type AmountSource =
   | { kind: 'weight'; food: AmountFood; initialGrams: number }
   | { kind: 'recipe'; recipe: Recipe };
 
 export default function FoodSearchScreen() {
-  const params = useLocalSearchParams<{ date?: string; meal?: MealType }>();
-  const { recipes, foodLogs, addFoodLog } = useStore();
-  const date = params.date ?? todayKey();
+  // `eventId` appends to an existing meal event; otherwise a new event is
+  // created at `at` (defaulting to now on `date`).
+  const params = useLocalSearchParams<{ date?: string; at?: string; eventId?: string }>();
+  const { recipes, foodLogs, mealEvents, logMealEvent, addFoodLogs } = useStore();
+  const existingEvent = params.eventId ? mealEvents.find((event) => event.id === params.eventId) : undefined;
+  const date = existingEvent?.date ?? params.date ?? todayKey();
   const recents = recentFoods(foodLogs);
 
-  const [meal, setMeal] = useState<MealType>(params.meal ?? 'breakfast');
+  const [loggedAt, setLoggedAt] = useState(() => params.at ?? defaultTimeOnDate(date));
+  const [title, setTitle] = useState('');
+  const [basket, setBasket] = useState<BasketItem[]>([]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -121,10 +135,44 @@ export default function FoodSearchScreen() {
   const brandedResults = useMemo(() => results.filter((result) => result.tier === 'branded'), [results]);
   const hasSettledQuery = query.trim().length >= 2 && !searching && !searchError;
 
-  const logAndClose = (entry: Parameters<typeof addFoodLog>[0]) => {
-    addFoodLog(entry);
+  // Picking a food drops it in the basket and returns to the list, so a
+  // multi-food meal is one visit; nothing is written until "Log N items".
+  const addToBasket = (item: BasketItem) => {
+    haptics.selection();
+    setBasket((current) => [...current, item]);
+    setSelected(null);
+    setShowRecipes(false);
+    setShowCustom(false);
+  };
+
+  const logBasket = () => {
+    if (basket.length === 0) return;
+    haptics.impact();
+    if (existingEvent) {
+      addFoodLogs(basket.map((item) => ({ ...item, date, eventId: existingEvent.id })));
+    } else {
+      const eventId = makeId();
+      const trimmed = title.trim();
+      logMealEvent(
+        { id: eventId, date, loggedAt, title: trimmed.length > 0 ? trimmed : undefined },
+        basket.map((item) => ({ ...item, date, eventId })),
+      );
+    }
     router.back();
   };
+
+  const cancel = () => {
+    if (basket.length === 0) {
+      router.back();
+      return;
+    }
+    Alert.alert('Discard this meal?', `${basket.length} picked food${basket.length === 1 ? '' : 's'} won't be logged.`, [
+      { text: 'Keep picking', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => router.back() },
+    ]);
+  };
+
+  const showingList = !selected && !showRecipes && !showCustom;
 
   return (
     <ThemedView style={styles.container}>
@@ -133,30 +181,34 @@ export default function FoodSearchScreen() {
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.topRow}>
-            <Pressable hitSlop={12} onPress={() => router.back()}>
+            <Pressable hitSlop={12} onPress={cancel}>
               <ThemedText type="link" themeColor="textSecondary">
                 Cancel
               </ThemedText>
             </Pressable>
-            <ThemedText type="smallBold">Add Food</ThemedText>
+            <ThemedText type="smallBold" numberOfLines={1} style={styles.topTitle}>
+              {existingEvent ? `Add to ${mealEventTitle(existingEvent)}` : 'New Meal'}
+            </ThemedText>
             <View style={styles.topSpacer} />
           </View>
 
-          <View style={styles.mealChips}>
-            {MEAL_ORDER.map((option) => {
-              const active = meal === option;
-              return (
-                <Pressable
-                  key={option}
-                  style={[styles.mealChip, active && styles.mealChipActive]}
-                  onPress={() => setMeal(option)}>
-                  <ThemedText type="small" themeColor={active ? 'onPrimary' : 'textSecondary'}>
-                    {MEAL_LABELS[option]}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+          {existingEvent ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.eventMeta}>
+              Logged at <ThemedText type="statInline">{formatClock(existingEvent.loggedAt)}</ThemedText>
+            </ThemedText>
+          ) : (
+            <View style={styles.eventMeta}>
+              <TimeField date={date} value={loggedAt} onChange={setLoggedAt} />
+              <TextInput
+                style={styles.titleInput}
+                placeholder={`${suggestMealTitle(loggedAt)} (title optional)`}
+                placeholderTextColor={colors.textMuted}
+                value={title}
+                onChangeText={setTitle}
+                returnKeyType="done"
+              />
+            </View>
+          )}
 
           {selected ? (
             <AmountPanel
@@ -164,10 +216,8 @@ export default function FoodSearchScreen() {
               onBack={() => setSelected(null)}
               onLog={(result) => {
                 if (selected.kind === 'weight') {
-                  logAndClose({
+                  addToBasket({
                     id: makeId(),
-                    date,
-                    meal,
                     name: selected.food.name,
                     brand: selected.food.brand,
                     grams: result.grams,
@@ -175,10 +225,8 @@ export default function FoodSearchScreen() {
                   });
                 } else {
                   const count = Math.round(result.servings * 100) / 100;
-                  logAndClose({
+                  addToBasket({
                     id: makeId(),
-                    date,
-                    meal,
                     name: count === 1 ? selected.recipe.name : `${selected.recipe.name} ×${count}`,
                     ...result.macros,
                   });
@@ -194,7 +242,7 @@ export default function FoodSearchScreen() {
           ) : showCustom ? (
             <CustomFoodPanel
               onBack={() => setShowCustom(false)}
-              onLog={(entry) => logAndClose({ id: makeId(), date, meal, ...entry })}
+              onLog={(entry) => addToBasket({ id: makeId(), ...entry })}
             />
           ) : (
             <ScrollView
@@ -210,7 +258,9 @@ export default function FoodSearchScreen() {
                 onChangeText={setQuery}
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoFocus
+                // Only on the first visit — returning with a basket shouldn't
+                // throw the keyboard over the tray.
+                autoFocus={basket.length === 0}
               />
 
               <View style={styles.entryPointRow}>
@@ -300,9 +350,58 @@ export default function FoodSearchScreen() {
               )}
             </ScrollView>
           )}
+
+          {showingList && basket.length > 0 && (
+            <BasketTray
+              items={basket}
+              onRemove={(id) => setBasket((current) => current.filter((item) => item.id !== id))}
+              onLog={logBasket}
+            />
+          )}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+/** The foods picked so far, pinned under the list with the one "Log N items" action. */
+function BasketTray({
+  items,
+  onRemove,
+  onLog,
+}: {
+  items: BasketItem[];
+  onRemove: (id: string) => void;
+  onLog: () => void;
+}) {
+  const totals = items.reduce<Macros>((sum, item) => addMacros(sum, item), EMPTY_MACROS);
+  return (
+    <View style={styles.tray}>
+      <ScrollView style={styles.trayList} contentContainerStyle={styles.trayListContent}>
+        {items.map((item) => (
+          <View key={item.id} style={styles.trayRow}>
+            <ThemedText type="small" numberOfLines={1} style={styles.flex}>
+              {item.name}
+            </ThemedText>
+            <ThemedText type="small">
+              <ThemedText type="statInline">{Math.round(item.calories)}</ThemedText> cal
+            </ThemedText>
+            <Pressable hitSlop={8} onPress={() => onRemove(item.id)}>
+              <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
+            </Pressable>
+          </View>
+        ))}
+      </ScrollView>
+      <Pressable style={({ pressed }) => [styles.trayButton, pressed && styles.trayButtonPressed]} onPress={onLog}>
+        <ThemedText type="smallBold" themeColor="onPrimary">
+          Log {items.length} item{items.length === 1 ? '' : 's'} ·{' '}
+          <ThemedText type="statInline" themeColor="onPrimary">
+            {Math.round(totals.calories)}
+          </ThemedText>{' '}
+          cal
+        </ThemedText>
+      </Pressable>
+    </View>
   );
 }
 
@@ -516,7 +615,7 @@ function AmountPanel({
           });
         }}>
         <ThemedText type="smallBold" style={styles.primaryButtonText}>
-          Log Food
+          Add to meal
         </ThemedText>
       </Pressable>
     </ScrollView>
@@ -650,7 +749,7 @@ function CustomFoodPanel({
           })
         }>
         <ThemedText type="smallBold" style={styles.primaryButtonText}>
-          Log Food
+          Add to meal
         </ThemedText>
       </Pressable>
     </ScrollView>
@@ -820,22 +919,48 @@ const styles = StyleSheet.create({
   topSpacer: {
     width: 48,
   },
-  mealChips: {
-    flexDirection: 'row',
+  topTitle: {
+    flexShrink: 1,
+  },
+  eventMeta: {
     gap: Spacing.two,
     paddingBottom: Spacing.three,
   },
-  mealChip: {
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.one,
-    borderRadius: Radius.full,
-    backgroundColor: colors.surfaceElevated,
+  titleInput: {
+    borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: colors.border,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    color: colors.text,
   },
-  mealChipActive: {
+  tray: {
+    gap: Spacing.two,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.two,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  trayList: {
+    maxHeight: 132,
+  },
+  trayListContent: {
+    gap: Spacing.one,
+  },
+  trayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.one,
+  },
+  trayButton: {
+    borderRadius: Radius.md,
     backgroundColor: colors.primary,
-    borderColor: 'transparent',
+    paddingVertical: Spacing.three,
+    alignItems: 'center',
+  },
+  trayButtonPressed: {
+    backgroundColor: colors.primaryDark,
   },
   listContent: {
     gap: Spacing.two,

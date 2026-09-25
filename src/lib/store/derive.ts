@@ -14,7 +14,7 @@ import type {
   GoalEntry,
   GoalMetric,
   Macros,
-  MealType,
+  MealEvent,
   MeasurementEntry,
   ProgressPoint,
   Recipe,
@@ -935,15 +935,6 @@ export function cardioRoutinePR(
 // Nutrition
 // ---------------------------------------------------------------------------
 
-export const MEAL_ORDER: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
-
-export const MEAL_LABELS: Record<MealType, string> = {
-  breakfast: 'Breakfast',
-  lunch: 'Lunch',
-  dinner: 'Dinner',
-  snack: 'Snacks',
-};
-
 export const EMPTY_MACROS: Macros = { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 };
 
 /**
@@ -976,26 +967,186 @@ export function macroSummary(macros: Macros): string {
   return `${Math.round(macros.proteinG)}p · ${Math.round(macros.carbsG)}c · ${Math.round(macros.fatG)}f`;
 }
 
-/** A day's food logs grouped by meal, plus summed macro totals for the day and per meal. */
-export function nutritionForDate(
-  foodLogs: FoodLogEntry[],
-  date: string,
-): { totals: Macros; byMeal: Record<MealType, FoodLogEntry[]>; mealTotals: Record<MealType, Macros> } {
-  const byMeal: Record<MealType, FoodLogEntry[]> = { breakfast: [], lunch: [], dinner: [], snack: [] };
-  const mealTotals: Record<MealType, Macros> = {
-    breakfast: EMPTY_MACROS,
-    lunch: EMPTY_MACROS,
-    dinner: EMPTY_MACROS,
-    snack: EMPTY_MACROS,
-  };
+/** A day's summed macro totals. */
+export function nutritionForDate(foodLogs: FoodLogEntry[], date: string): { totals: Macros } {
   let totals = EMPTY_MACROS;
   for (const entry of foodLogs) {
-    if (entry.date !== date) continue;
-    byMeal[entry.meal].push(entry);
-    mealTotals[entry.meal] = addMacros(mealTotals[entry.meal], entry);
-    totals = addMacros(totals, entry);
+    if (entry.date === date) totals = addMacros(totals, entry);
   }
-  return { totals, byMeal, mealTotals };
+  return { totals };
+}
+
+// ---------------------------------------------------------------------------
+// Food timeline
+// ---------------------------------------------------------------------------
+
+/** An empty stretch at least this long collapses into a tappable gap marker. */
+export const TIMELINE_GAP_MINUTES = 45;
+
+const MINUTE_MS = 60_000;
+
+/** ISO timestamp for a local clock time on a date key. */
+export function timeOnDate(dateKey: string, hours: number, minutes: number): string {
+  const at = new Date(`${dateKey}T00:00:00`);
+  at.setHours(hours, minutes, 0, 0);
+  return at.toISOString();
+}
+
+/** Rounds a timestamp to the nearest `step` minutes (default 5). */
+export function roundToMinutes(ms: number, step = 5): number {
+  const stepMs = step * MINUTE_MS;
+  return Math.round(ms / stepMs) * stepMs;
+}
+
+/**
+ * Where a new entry lands by default on a day: now for today, otherwise the
+ * current clock time carried onto that date — close enough to adjust, and
+ * never a surprise midnight.
+ */
+export function defaultTimeOnDate(dateKey: string): string {
+  const now = new Date();
+  return timeOnDate(dateKey, now.getHours(), now.getMinutes());
+}
+
+/** "7:42 AM" — the timeline's clock format. */
+export function formatClock(at: string | number | Date): string {
+  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/** "2h 10m" / "45m" for a gap or span. */
+export function formatSpan(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+/** Time-of-day label for an untitled meal event. */
+export function suggestMealTitle(loggedAt: string): string {
+  const at = new Date(loggedAt);
+  const minutes = at.getHours() * 60 + at.getMinutes();
+  if (minutes >= 4 * 60 && minutes < 10 * 60 + 30) return 'Breakfast';
+  if (minutes >= 10 * 60 + 30 && minutes < 14 * 60 + 30) return 'Lunch';
+  if (minutes >= 17 * 60 && minutes < 21 * 60 + 30) return 'Dinner';
+  return 'Snack';
+}
+
+export function mealEventTitle(event: MealEvent): string {
+  return event.title?.trim() || suggestMealTitle(event.loggedAt);
+}
+
+export type TimelineNode =
+  | {
+      kind: 'food';
+      key: string;
+      startMs: number;
+      endMs: number;
+      event: MealEvent;
+      items: FoodLogEntry[];
+      totals: Macros;
+      /** Calories eaten so far today, this event included. */
+      runningCalories: number;
+    }
+  | { kind: 'water'; key: string; startMs: number; endMs: number; entry: WaterEntry }
+  | { kind: 'workout'; key: string; startMs: number; endMs: number; session: Session }
+  | { kind: 'cardio'; key: string; startMs: number; endMs: number; session: CardioSession }
+  | { kind: 'gap'; key: string; startMs: number; endMs: number; minutes: number }
+  | { kind: 'now'; key: string; startMs: number; endMs: number };
+
+/**
+ * One day on the Food timeline, oldest first: meal events (with their foods
+ * and a running calorie tally), water entries, and finished workout/cardio
+ * sessions as read-only context. Sessions span start→finish (finish is the
+ * saved row's timestamp; start backs off by the duration). Stretches of
+ * `TIMELINE_GAP_MINUTES`+ between entries become gap nodes, and on today a
+ * `now` node marks the current time (with a gap before it when warranted).
+ */
+export function dayTimeline(
+  date: string,
+  data: {
+    mealEvents: MealEvent[];
+    foodLogs: FoodLogEntry[];
+    waterEntries: WaterEntry[];
+    sessions: Session[];
+    cardioSessions: CardioSession[];
+  },
+  nowMs: number = Date.now(),
+): TimelineNode[] {
+  const itemsByEvent = new Map<string, FoodLogEntry[]>();
+  for (const entry of data.foodLogs) {
+    if (entry.date !== date) continue;
+    const list = itemsByEvent.get(entry.eventId);
+    if (list) list.push(entry);
+    else itemsByEvent.set(entry.eventId, [entry]);
+  }
+
+  const entries: Exclude<TimelineNode, { kind: 'gap' | 'now' }>[] = [];
+  for (const event of data.mealEvents) {
+    if (event.date !== date) continue;
+    // Oldest-logged first within an event; foodLogs is newest-first.
+    const items = [...(itemsByEvent.get(event.id) ?? [])].reverse();
+    const at = Date.parse(event.loggedAt);
+    entries.push({
+      kind: 'food',
+      key: `food:${event.id}`,
+      startMs: at,
+      endMs: at,
+      event,
+      items,
+      totals: items.reduce<Macros>((sum, item) => addMacros(sum, item), EMPTY_MACROS),
+      runningCalories: 0,
+    });
+  }
+  for (const entry of data.waterEntries) {
+    if (entry.date !== date) continue;
+    const at = Date.parse(entry.loggedAt);
+    entries.push({ kind: 'water', key: `water:${entry.id}`, startMs: at, endMs: at, entry });
+  }
+  for (const session of data.sessions) {
+    if (session.date !== date || !session.endedAt) continue;
+    const end = Date.parse(session.endedAt);
+    const start = end - session.durationMinutes * MINUTE_MS;
+    entries.push({ kind: 'workout', key: `workout:${session.id}`, startMs: start, endMs: end, session });
+  }
+  for (const session of data.cardioSessions) {
+    if (session.date !== date || !session.endedAt) continue;
+    const end = Date.parse(session.endedAt);
+    const start = end - session.minutes * MINUTE_MS;
+    entries.push({ kind: 'cardio', key: `cardio:${session.id}`, startMs: start, endMs: end, session });
+  }
+  entries.sort((a, b) => a.startMs - b.startMs);
+
+  let running = 0;
+  for (const node of entries) {
+    if (node.kind !== 'food') continue;
+    running += node.totals.calories;
+    node.runningCalories = running;
+  }
+
+  const nodes: TimelineNode[] = [];
+  const isToday = date === toDateKey(new Date(nowMs));
+  let nowPlaced = !isToday;
+  let cursor: number | null = null;
+  const pushGap = (from: number, to: number) => {
+    const minutes = (to - from) / MINUTE_MS;
+    if (minutes >= TIMELINE_GAP_MINUTES) {
+      nodes.push({ kind: 'gap', key: `gap:${from}`, startMs: from, endMs: to, minutes });
+    }
+  };
+  const placeNow = () => {
+    if (cursor !== null) pushGap(cursor, nowMs);
+    nodes.push({ kind: 'now', key: 'now', startMs: nowMs, endMs: nowMs });
+    cursor = nowMs;
+    nowPlaced = true;
+  };
+  for (const node of entries) {
+    if (!nowPlaced && node.startMs > nowMs) placeNow();
+    if (cursor !== null) pushGap(cursor, node.startMs);
+    nodes.push(node);
+    cursor = cursor === null ? node.endMs : Math.max(cursor, node.endMs);
+  }
+  if (!nowPlaced) placeNow();
+  return nodes;
 }
 
 /** A distinct previously-logged food, normalized back to per-100g so it can feed the same amount math as a fresh search result. */
@@ -1013,7 +1164,7 @@ export interface RecentFood {
 /**
  * Distinct foods the user has logged before (by name+brand), most recent
  * first, for quick re-logging. Relies on `foodLogs` already being
- * newest-first (remote fetch orders by date desc; `addFoodLog` prepends).
+ * newest-first (remote fetch orders by date desc; `logMealEvent`/`addFoodLogs` prepend).
  * Serving-based entries (recipes, no `grams`) are skipped — there's no
  * per-gram rate to normalize them to.
  */

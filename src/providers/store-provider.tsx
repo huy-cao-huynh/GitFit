@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import * as remote from '@/lib/store/remote';
+import { isLegacyEventId } from '@/lib/store/id';
 import { makeSeedGoals, seedPreferences } from '@/lib/store/seed';
 import type {
   BodyweightEntry,
@@ -17,6 +18,7 @@ import type {
   FoodLogEntry,
   GoalEntry,
   Goals,
+  MealEvent,
   MeasurementDef,
   MeasurementEntry,
   NutritionGoals,
@@ -44,10 +46,18 @@ interface StoreValue extends StoreData {
   toggleCheckoff: (date: string, defId: string) => void;
   addBodyweight: (entry: BodyweightEntry) => void;
   addWaterEntry: (entry: WaterEntry) => void;
+  updateWaterEntry: (entry: WaterEntry) => void;
+  deleteWaterEntry: (id: string) => void;
   setMeasurementDefs: (defs: MeasurementDef[]) => void;
   addMeasurementEntry: (entry: MeasurementEntry) => void;
-  addFoodLog: (entry: FoodLogEntry) => void;
+  /** A new timeline event plus the foods in it. */
+  logMealEvent: (event: MealEvent, items: FoodLogEntry[]) => void;
+  /** Appends foods to an existing event (their `eventId` must point at it). */
+  addFoodLogs: (items: FoodLogEntry[]) => void;
+  updateMealEvent: (event: MealEvent) => void;
+  deleteMealEvent: (id: string) => void;
   updateFoodLog: (entry: FoodLogEntry) => void;
+  /** Deleting an event's last food deletes the event too. */
   deleteFoodLog: (id: string) => void;
   addRecipe: (recipe: Recipe) => void;
   updateRecipe: (recipe: Recipe) => void;
@@ -74,6 +84,7 @@ const EMPTY: StoreData = {
   waterEntries: [],
   measurementDefs: [],
   measurementEntries: [],
+  mealEvents: [],
   foodLogs: [],
   recipes: [],
   nutritionGoals: null,
@@ -175,12 +186,15 @@ export function StoreProvider({ children }: PropsWithChildren) {
         ]);
       },
       addSession: (session) => {
-        apply('sessions', (sessions) => [session, ...sessions]);
-        persist('session', remote.insertSession(session));
+        // endedAt mirrors the row's created_at (server-stamped on insert).
+        const saved = { ...session, endedAt: session.endedAt ?? new Date().toISOString() };
+        apply('sessions', (sessions) => [saved, ...sessions]);
+        persist('session', remote.insertSession(saved));
       },
       addCardioSession: (session) => {
-        apply('cardioSessions', (cardioSessions) => [session, ...cardioSessions]);
-        persist('cardio session', remote.insertCardioSession(session));
+        const saved = { ...session, endedAt: session.endedAt ?? new Date().toISOString() };
+        apply('cardioSessions', (cardioSessions) => [saved, ...cardioSessions]);
+        persist('cardio session', remote.insertCardioSession(saved));
       },
       updateCardioSession: (session) => {
         apply('cardioSessions', (cardioSessions) =>
@@ -227,6 +241,14 @@ export function StoreProvider({ children }: PropsWithChildren) {
         );
         persist('water entry', remote.insertWaterEntry(entry));
       },
+      updateWaterEntry: (entry) => {
+        apply('waterEntries', (entries) => entries.map((existing) => (existing.id === entry.id ? entry : existing)));
+        persist('water entry', remote.updateWaterEntry(entry));
+      },
+      deleteWaterEntry: (id) => {
+        apply('waterEntries', (entries) => entries.filter((existing) => existing.id !== id));
+        persist('water entry delete', remote.deleteWaterEntry(id));
+      },
       setMeasurementDefs: (defs) => {
         apply('measurementDefs', () => defs);
         persist('measurement defs', remote.setMeasurementDefs(defs));
@@ -239,15 +261,48 @@ export function StoreProvider({ children }: PropsWithChildren) {
         );
         persist('measurement entry', remote.insertMeasurementEntry(entry));
       },
-      addFoodLog: (entry) => {
-        apply('foodLogs', (entries) => [entry, ...entries]);
-        persist('food log', remote.insertFoodLog(entry));
+      logMealEvent: (event, items) => {
+        apply('mealEvents', (events) => [event, ...events]);
+        // foodLogs is newest-first; the basket is pick order, so the last pick is newest.
+        apply('foodLogs', (entries) => [...[...items].reverse(), ...entries]);
+        persist('meal event', remote.insertMealEvent(event, items));
+      },
+      addFoodLogs: (items) => {
+        apply('foodLogs', (entries) => [...[...items].reverse(), ...entries]);
+        persist('food logs', remote.insertFoodLogs(items));
+      },
+      updateMealEvent: (event) => {
+        apply('mealEvents', (events) => events.map((e) => (e.id === event.id ? event : e)));
+        apply('foodLogs', (entries) =>
+          entries.map((e) => (e.eventId === event.id && e.date !== event.date ? { ...e, date: event.date } : e)),
+        );
+        // A synthesized pre-0013 event has no row to update.
+        if (!isLegacyEventId(event.id)) persist('meal event', remote.updateMealEvent(event));
+      },
+      deleteMealEvent: (id) => {
+        const foodIds = (data?.foodLogs ?? []).filter((e) => e.eventId === id).map((e) => e.id);
+        apply('mealEvents', (events) => events.filter((e) => e.id !== id));
+        apply('foodLogs', (entries) => entries.filter((e) => e.eventId !== id));
+        if (isLegacyEventId(id)) {
+          for (const foodId of foodIds) persist('food log delete', remote.deleteFoodLog(foodId));
+        } else {
+          persist('meal event delete', remote.deleteMealEvent(id));
+        }
       },
       updateFoodLog: (entry) => {
         apply('foodLogs', (entries) => entries.map((e) => (e.id === entry.id ? entry : e)));
         persist('food log', remote.updateFoodLog(entry));
       },
       deleteFoodLog: (id) => {
+        const entry = data?.foodLogs.find((e) => e.id === id);
+        const isLast = entry && !data?.foodLogs.some((e) => e.eventId === entry.eventId && e.id !== id);
+        if (entry && isLast && !isLegacyEventId(entry.eventId)) {
+          apply('mealEvents', (events) => events.filter((e) => e.id !== entry.eventId));
+          apply('foodLogs', (entries) => entries.filter((e) => e.id !== id));
+          persist('meal event delete', remote.deleteMealEvent(entry.eventId));
+          return;
+        }
+        if (entry && isLast) apply('mealEvents', (events) => events.filter((e) => e.id !== entry.eventId));
         apply('foodLogs', (entries) => entries.filter((e) => e.id !== id));
         persist('food log delete', remote.deleteFoodLog(id));
       },

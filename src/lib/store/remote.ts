@@ -21,6 +21,7 @@ import type {
   GoalMetric,
   Goals,
   GpsPoint,
+  MealEvent,
   MealType,
   MeasurementDef,
   MeasurementEntry,
@@ -113,6 +114,7 @@ interface SessionRow {
   date: string;
   duration_minutes: number;
   calories: number | null;
+  created_at: string;
   session_exercises: SessionExerciseRow[];
 }
 
@@ -128,6 +130,7 @@ interface CardioSessionRow {
   route: GpsPoint[] | null;
   elevation_gain_ft: number | null;
   avg_pace_sec_per_mile: number | null;
+  created_at: string;
 }
 
 interface GoalRow {
@@ -162,6 +165,9 @@ interface WaterEntryRow {
   id: string;
   date: string;
   ounces: number;
+  created_at: string;
+  /** Absent before migration 0013; falls back to created_at. */
+  logged_at?: string;
 }
 
 interface MeasurementDefRow {
@@ -181,7 +187,10 @@ interface MeasurementEntryRow {
 interface FoodLogRow {
   id: string;
   date: string;
-  meal: MealType;
+  /** Null on rows written after migration 0013; the legacy grouping key before it. */
+  meal: MealType | null;
+  /** Absent before migration 0013, and null on rows it hasn't backfilled. */
+  event_id?: string | null;
   name: string;
   brand: string | null;
   grams: number | null;
@@ -189,6 +198,13 @@ interface FoodLogRow {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+}
+
+interface MealEventRow {
+  id: string;
+  date: string;
+  logged_at: string;
+  title: string | null;
 }
 
 interface RecipeIngredientRow {
@@ -295,6 +311,7 @@ function mapSession(row: SessionRow): Session {
     date: row.date,
     durationMinutes: row.duration_minutes,
     calories: row.calories ?? undefined,
+    endedAt: row.created_at,
     exercises: byPosition(row.session_exercises).map((exercise) => ({
       exerciseId: exercise.exercise_id,
       name: exercise.name,
@@ -330,6 +347,9 @@ function mapCardioSession(row: CardioSessionRow): CardioSession {
     route: row.route ?? undefined,
     elevationGainFt: row.elevation_gain_ft ?? undefined,
     avgPaceSecPerMile: row.avg_pace_sec_per_mile ?? undefined,
+    // A Strava import's row is created when it syncs, not when the activity
+    // happened; its route's last fix carries the real finish time.
+    endedAt: row.route?.length ? new Date(row.route[row.route.length - 1].t).toISOString() : row.created_at,
   };
 }
 
@@ -364,11 +384,55 @@ function mapCheckoffLog(rows: CheckoffLogRow[]): CheckoffLog {
   return log;
 }
 
+/** Default local clock time (hours, minutes) for a legacy meal's synthesized event — mirrors migration 0013's backfill. */
+const LEGACY_MEAL_TIMES: Record<MealType, [number, number]> = {
+  breakfast: [8, 0],
+  lunch: [12, 30],
+  snack: [15, 30],
+  dinner: [18, 30],
+};
+
+const LEGACY_MEAL_TITLES: Record<MealType, string> = {
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  snack: 'Snacks',
+  dinner: 'Dinner',
+};
+
+function legacyEventId(row: FoodLogRow): string {
+  return `legacy:${row.date}:${row.meal ?? 'snack'}`;
+}
+
+/**
+ * Food logs from before migration 0013 have no event; group them into one
+ * synthesized event per (date, meal) at the backfill's default times so the
+ * timeline still renders. These ids aren't real rows — editing them only
+ * works once the migration has turned them into meal_events.
+ */
+function synthesizeLegacyEvents(rows: FoodLogRow[]): MealEvent[] {
+  const events = new Map<string, MealEvent>();
+  for (const row of rows) {
+    if (row.event_id) continue;
+    const id = legacyEventId(row);
+    if (events.has(id)) continue;
+    const meal = row.meal ?? 'snack';
+    const [hours, minutes] = LEGACY_MEAL_TIMES[meal];
+    const at = new Date(`${row.date}T00:00:00`);
+    at.setHours(hours, minutes);
+    events.set(id, { id, date: row.date, loggedAt: at.toISOString(), title: LEGACY_MEAL_TITLES[meal] });
+  }
+  return [...events.values()];
+}
+
+function mapMealEvent(row: MealEventRow): MealEvent {
+  return { id: row.id, date: row.date, loggedAt: row.logged_at, title: row.title ?? undefined };
+}
+
 function mapFoodLog(row: FoodLogRow): FoodLogEntry {
   return {
     id: row.id,
     date: row.date,
-    meal: row.meal,
+    eventId: row.event_id ?? legacyEventId(row),
     name: row.name,
     brand: row.brand ?? undefined,
     grams: row.grams ?? undefined,
@@ -451,10 +515,10 @@ function unwrap<T>(result: { data: T | null; error: { message: string } | null }
  * instead of failing the whole hydration.
  */
 async function fetchNutritionData(): Promise<
-  Pick<StoreData, 'foodLogs' | 'recipes' | 'nutritionGoals'>
+  Pick<StoreData, 'mealEvents' | 'foodLogs' | 'recipes' | 'nutritionGoals'>
 > {
   try {
-    const [foodLogs, recipes, nutritionGoals] = await Promise.all([
+    const [foodLogs, recipes, nutritionGoals, mealEvents] = await Promise.all([
       supabase
         .from('food_logs')
         .select('*')
@@ -467,15 +531,25 @@ async function fetchNutritionData(): Promise<
         .order('position')
         .returns<RecipeRow[]>(),
       supabase.from('nutrition_goals').select('*').maybeSingle<NutritionGoalsRow>(),
+      // meal_events arrived in 0013; without it every food row falls back to
+      // a synthesized legacy event instead of failing hydration.
+      supabase
+        .from('meal_events')
+        .select('id, date, logged_at, title')
+        .order('logged_at', { ascending: false })
+        .returns<MealEventRow[]>(),
     ]);
+    const foodLogRows = unwrap(foodLogs);
+    if (mealEvents.error) console.warn('Failed to fetch meal events (migration 0013 applied?)', mealEvents.error);
     return {
-      foodLogs: unwrap(foodLogs).map(mapFoodLog),
+      mealEvents: [...(mealEvents.error ? [] : mealEvents.data).map(mapMealEvent), ...synthesizeLegacyEvents(foodLogRows)],
+      foodLogs: foodLogRows.map(mapFoodLog),
       recipes: unwrap(recipes).map(mapRecipe),
       nutritionGoals: mapNutritionGoals(nutritionGoals.error ? null : nutritionGoals.data),
     };
   } catch (error) {
     console.warn('Failed to fetch nutrition data (migration 0005 applied?)', error);
-    return { foodLogs: [], recipes: [], nutritionGoals: null };
+    return { mealEvents: [], foodLogs: [], recipes: [], nutritionGoals: null };
   }
 }
 
@@ -564,7 +638,8 @@ export async function fetchStoreData(): Promise<StoreData> {
     supabase.from('steps_entries').select('date, steps').order('date').returns<StepsEntry[]>(),
     supabase
       .from('water_entries')
-      .select('id, date, ounces')
+      // `*` rather than naming logged_at, so a pre-0013 project still hydrates.
+      .select('*')
       .order('date', { ascending: false })
       .returns<WaterEntryRow[]>(),
     supabase.from('measurement_defs').select('*').order('position').returns<MeasurementDefRow[]>(),
@@ -585,7 +660,12 @@ export async function fetchStoreData(): Promise<StoreData> {
     checkoffLog: mapCheckoffLog(unwrap(checkoffLog)),
     bodyweight: unwrap(bodyweight),
     steps: unwrap(steps),
-    waterEntries: unwrap(waterEntries),
+    waterEntries: unwrap(waterEntries).map((row) => ({
+      id: row.id,
+      date: row.date,
+      ounces: row.ounces,
+      loggedAt: row.logged_at ?? row.created_at,
+    })),
     measurementDefs: unwrap(measurementDefs).map(({ id, label, unit }) => ({ id, label, unit })),
     measurementEntries: unwrap(measurementEntries),
     stravaActivities: await stravaActivitiesPromise,
@@ -844,10 +924,22 @@ export async function upsertBodyweight(entry: BodyweightEntry): Promise<void> {
   throwIfError(error);
 }
 
+function waterEntryToRow(entry: WaterEntry) {
+  return { id: entry.id, date: entry.date, ounces: entry.ounces, logged_at: entry.loggedAt };
+}
+
 export async function insertWaterEntry(entry: WaterEntry): Promise<void> {
-  const { error } = await supabase
-    .from('water_entries')
-    .upsert({ id: entry.id, date: entry.date, ounces: entry.ounces });
+  const { error } = await supabase.from('water_entries').upsert(waterEntryToRow(entry));
+  throwIfError(error);
+}
+
+export async function updateWaterEntry(entry: WaterEntry): Promise<void> {
+  const { error } = await supabase.from('water_entries').update(waterEntryToRow(entry)).eq('id', entry.id);
+  throwIfError(error);
+}
+
+export async function deleteWaterEntry(id: string): Promise<void> {
+  const { error } = await supabase.from('water_entries').delete().eq('id', id);
   throwIfError(error);
 }
 
@@ -879,7 +971,7 @@ function foodLogToRow(entry: FoodLogEntry) {
   return {
     id: entry.id,
     date: entry.date,
-    meal: entry.meal,
+    event_id: entry.eventId,
     name: entry.name,
     brand: entry.brand ?? null,
     grams: entry.grams ?? null,
@@ -890,8 +982,34 @@ function foodLogToRow(entry: FoodLogEntry) {
   };
 }
 
-export async function insertFoodLog(entry: FoodLogEntry): Promise<void> {
-  const { error } = await supabase.from('food_logs').insert(foodLogToRow(entry));
+function mealEventToRow(event: MealEvent) {
+  return { id: event.id, date: event.date, logged_at: event.loggedAt, title: event.title ?? null };
+}
+
+/** Event first, then its foods — food_logs.event_id references it. */
+export async function insertMealEvent(event: MealEvent, items: FoodLogEntry[]): Promise<void> {
+  const { error } = await supabase.from('meal_events').insert(mealEventToRow(event));
+  throwIfError(error);
+  await insertFoodLogs(items);
+}
+
+/** Moving an event moves its foods' `date` too, so a day change keeps them together. */
+export async function updateMealEvent(event: MealEvent): Promise<void> {
+  const { error } = await supabase.from('meal_events').update(mealEventToRow(event)).eq('id', event.id);
+  throwIfError(error);
+  const { error: foodError } = await supabase.from('food_logs').update({ date: event.date }).eq('event_id', event.id);
+  throwIfError(foodError);
+}
+
+/** food_logs cascade on the FK. */
+export async function deleteMealEvent(id: string): Promise<void> {
+  const { error } = await supabase.from('meal_events').delete().eq('id', id);
+  throwIfError(error);
+}
+
+export async function insertFoodLogs(entries: FoodLogEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const { error } = await supabase.from('food_logs').insert(entries.map(foodLogToRow));
   throwIfError(error);
 }
 

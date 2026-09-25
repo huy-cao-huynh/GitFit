@@ -81,6 +81,8 @@ export interface Session {
   durationMinutes: number;
   calories?: number;
   exercises: SessionExercise[];
+  /** ISO timestamp the session was saved (≈ finished) — the row's created_at. Places it on the Food timeline. */
+  endedAt?: string;
 }
 
 /** One GPS fix recorded during a live-tracked cardio session. */
@@ -107,6 +109,8 @@ export interface CardioSession {
   activityType: CardioActivityType;
   date: string; // YYYY-MM-DD (local)
   minutes: number;
+  /** ISO timestamp the session was saved (≈ finished) — the row's created_at. Places it on the Food timeline. */
+  endedAt?: string;
   distanceMiles?: number;
   calories?: number;
   /** Recorded route, present only for GPS-tracked sessions. */
@@ -165,6 +169,8 @@ export interface WaterEntry {
   id: string;
   date: string;
   ounces: number;
+  /** ISO timestamp of the drink; places it on the Food timeline. */
+  loggedAt: string;
 }
 
 /** A user-defined body measurement category (Waist, Chest, …) tracked over time. */
@@ -182,7 +188,21 @@ export interface MeasurementEntry {
   unit: string;
 }
 
+/**
+ * Legacy meal category. Food is now grouped into timed `MealEvent`s; this only
+ * survives to map pre-0013 rows (no `event_id`) onto synthesized events.
+ */
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+/** A moment on the Food timeline holding one or more logged foods. */
+export interface MealEvent {
+  id: string;
+  date: string; // YYYY-MM-DD (local)
+  /** ISO timestamp; its local clock time is where the event sits on the day. */
+  loggedAt: string;
+  /** Optional user title; blank renders a time-based suggestion (`suggestMealTitle`). */
+  title?: string;
+}
 
 /** Macro totals; also the shape of a day's summed intake. */
 export interface Macros {
@@ -192,11 +212,11 @@ export interface Macros {
   fatG: number;
 }
 
-/** One logged food (or recipe serving) on a date, nutrients snapshotted at log time. */
+/** One logged food (or recipe serving) inside a meal event, nutrients snapshotted at log time. */
 export interface FoodLogEntry extends Macros {
   id: string;
-  date: string; // YYYY-MM-DD (local)
-  meal: MealType;
+  date: string; // YYYY-MM-DD (local), always the parent event's date
+  eventId: string;
   name: string;
   brand?: string;
   /** Amount logged, canonical grams; undefined for serving-based entries (recipes). */
@@ -276,6 +296,7 @@ export interface StoreData {
   waterEntries: WaterEntry[];
   measurementDefs: MeasurementDef[];
   measurementEntries: MeasurementEntry[];
+  mealEvents: MealEvent[];
   foodLogs: FoodLogEntry[];
   recipes: Recipe[];
   nutritionGoals: NutritionGoals | null;

@@ -73,7 +73,12 @@ export default function DashboardScreen() {
 
   const addWater = (displayAmount: number) => {
     haptics.impact();
-    addWaterEntry({ id: makeId(), date: today, ounces: Math.round(fromDisplayVolume(displayAmount, unitSystem)) });
+    addWaterEntry({
+      id: makeId(),
+      date: today,
+      ounces: Math.round(fromDisplayVolume(displayAmount, unitSystem)),
+      loggedAt: new Date().toISOString(),
+    });
   };
 
   const weighInGoal = goals.find((goal) => goal.metric === 'bodyweight');

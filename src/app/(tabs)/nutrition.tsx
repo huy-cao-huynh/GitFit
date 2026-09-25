@@ -1,32 +1,30 @@
-import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { AnimatedNumber } from '@/components/animated-number';
+import { DayTimeline } from '@/components/day-timeline';
 import { ScreenBackground } from '@/components/screen-background';
 import { TabFadeView } from '@/components/tab-fade-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WaterBottle } from '@/components/water-bottle';
+import { WaterEntrySheet } from '@/components/water-entry-sheet';
 import { BottomTabInset, Colors, MaxContentWidth, Motion, Radius, Spacing } from '@/constants/theme';
 import {
   dayLabel,
+  dayTimeline,
   DEFAULT_NUTRITION_GOALS,
-  MEAL_LABELS,
-  MEAL_ORDER,
-  macroSummary,
   nutritionForDate,
   shiftDateKey,
+  timeOnDate,
   todayKey,
-  todayWaterOunces,
 } from '@/lib/store/derive';
-import { haptics } from '@/lib/haptics';
 import { makeId } from '@/lib/store/id';
-import type { FoodLogEntry, MealType } from '@/lib/store/types';
+import type { WaterEntry } from '@/lib/store/types';
 import { useResetScrollOnFocus } from '@/lib/use-reset-scroll-on-focus';
 import { fromDisplayVolume, toDisplayVolume, volumeUnitLabel } from '@/lib/units';
 import { useStore } from '@/providers/store-provider';
@@ -34,51 +32,82 @@ import { useStore } from '@/providers/store-provider';
 const colors = Colors;
 const WATER_QUICK_ADD_IMPERIAL = 16;
 const WATER_QUICK_ADD_METRIC = 500;
+/** How often the NOW rule (and "Add at <now>") re-reads the clock. */
+const CLOCK_TICK_MS = 60_000;
+
+/** Ticking wall clock, so the timeline's NOW rule stays current while the tab is open. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
 
 export default function NutritionScreen() {
-  const { foodLogs, nutritionGoals, deleteFoodLog, goals: userGoals, waterEntries, addWaterEntry, preferences } =
-    useStore();
+  const {
+    mealEvents,
+    foodLogs,
+    nutritionGoals,
+    goals: userGoals,
+    waterEntries,
+    sessions,
+    cardioSessions,
+    addWaterEntry,
+    updateWaterEntry,
+    deleteWaterEntry,
+    preferences,
+  } = useStore();
   const scrollRef = useResetScrollOnFocus<ScrollView>();
   const [date, setDate] = useState(todayKey());
+  const [editingWater, setEditingWater] = useState<WaterEntry | null>(null);
+  const now = useNow();
+  const { height: windowHeight } = useWindowDimensions();
 
   const goals = nutritionGoals ?? DEFAULT_NUTRITION_GOALS;
-  const { totals, byMeal, mealTotals } = useMemo(() => nutritionForDate(foodLogs, date), [foodLogs, date]);
+  const { totals } = useMemo(() => nutritionForDate(foodLogs, date), [foodLogs, date]);
   const remaining = Math.round(goals.calories - totals.calories);
+  const timeline = useMemo(
+    () => dayTimeline(date, { mealEvents, foodLogs, waterEntries, sessions, cardioSessions }, now),
+    [date, mealEvents, foodLogs, waterEntries, sessions, cardioSessions, now],
+  );
 
   const unitSystem = preferences.unitSystem;
-  const today = todayKey();
+  const isToday = date === todayKey();
+  // Today logs at the real now; another day carries the current clock time
+  // onto that date, which is close enough to adjust from.
+  const nowDate = new Date(now);
+  const addAt = isToday ? nowDate.toISOString() : timeOnDate(date, nowDate.getHours(), nowDate.getMinutes());
+
   const waterGoal = userGoals.find((goal) => goal.metric === 'water');
-  const todayWater = todayWaterOunces(waterEntries);
+  const dayWaterEntries = waterEntries.filter((entry) => entry.date === date);
+  const dayWater = dayWaterEntries.reduce((sum, entry) => sum + entry.ounces, 0);
   // Same weekly-target → daily-target math as the dashboard's water bento tile
   // (dashboard.tsx), so the two widgets never disagree.
   const dailyWaterTarget = waterGoal ? Math.max(1, Math.round(waterGoal.target / 7)) : 0;
   const quickAdd = unitSystem === 'metric' ? WATER_QUICK_ADD_METRIC : WATER_QUICK_ADD_IMPERIAL;
+  const latestWater = dayWaterEntries
+    .filter((entry) => entry.ounces > 0)
+    .reduce<WaterEntry | null>((latest, entry) => (!latest || entry.loggedAt > latest.loggedAt ? entry : latest), null);
 
-  const goToSearch = (meal: MealType) =>
-    router.push({ pathname: '/food/search', params: { date, meal } });
+  const goToSearch = (at: string) => router.push({ pathname: '/food/search', params: { date, at } });
 
-  // Same confirmation shape as the food/[id] detail screen, so every delete
-  // path in the app asks first.
-  const confirmDelete = (entry: FoodLogEntry) => {
-    Alert.alert('Delete entry?', `Removes ${entry.name} from your log for good.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          haptics.notification(Haptics.NotificationFeedbackType.Warning);
-          deleteFoodLog(entry.id);
-        },
-      },
-    ]);
+  const addWater = () => {
+    const ounces = Math.round(fromDisplayVolume(quickAdd, unitSystem));
+    addWaterEntry({ id: makeId(), date, ounces, loggedAt: addAt });
   };
 
-  const addWater = (displayAmount: number) => {
-    let deltaOunces = Math.round(fromDisplayVolume(displayAmount, unitSystem));
-    if (deltaOunces < 0) deltaOunces = Math.max(deltaOunces, -todayWater);
-    if (deltaOunces === 0) return;
-    addWaterEntry({ id: makeId(), date: today, ounces: deltaOunces });
-  };
+  // Scroll the NOW rule into view when it sits below the fold; runs after
+  // useResetScrollOnFocus's reset-to-top since that hook registered first.
+  const timelineY = useRef(0);
+  const [nowY, setNowY] = useState<number | null>(null);
+  const scrollToNow = useCallback(() => {
+    if (!isToday || nowY === null) return;
+    const y = timelineY.current + nowY;
+    if (y > windowHeight * 0.7) scrollRef.current?.scrollTo({ y: y - windowHeight * 0.5, animated: false });
+  }, [isToday, nowY, windowHeight, scrollRef]);
+  useFocusEffect(scrollToNow);
 
   return (
     <TabFadeView style={styles.container}>
@@ -145,43 +174,17 @@ export default function NutritionScreen() {
               <MacroBar label="Fat" value={totals.fatG} target={goals.fatG} color={colors.textSecondary} />
             </ThemedView>
 
-            {MEAL_ORDER.map((meal) => {
-              const entries = byMeal[meal];
-              const mealMacros = mealTotals[meal];
-              const mealCalories = Math.round(mealMacros.calories);
-              return (
-                <View key={meal} style={styles.mealSection}>
-                  <View style={styles.mealHeader}>
-                    <ThemedText type="label" style={styles.sectionLabel}>
-                      {MEAL_LABELS[meal].toUpperCase()}
-                    </ThemedText>
-                    {entries.length > 0 && (
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {mealCalories} cal · {macroSummary(mealMacros)}
-                      </ThemedText>
-                    )}
-                  </View>
-                  <ThemedView type="surface" style={styles.mealCard}>
-                    {entries.map((entry, index) => (
-                      <FoodRow
-                        key={entry.id}
-                        entry={entry}
-                        divider={index > 0}
-                        onDelete={() => confirmDelete(entry)}
-                      />
-                    ))}
-                    <Pressable
-                      style={[styles.addRow, entries.length > 0 && styles.rowDivider]}
-                      onPress={() => goToSearch(meal)}>
-                      <SymbolView name="plus.circle.fill" size={20} tintColor={colors.primaryLight} />
-                      <ThemedText type="small" style={{ color: colors.primaryLight }}>
-                        Add food
-                      </ThemedText>
-                    </Pressable>
-                  </ThemedView>
-                </View>
-              );
-            })}
+            <View onLayout={(event) => (timelineY.current = event.nativeEvent.layout.y)}>
+              <DayTimeline
+                nodes={timeline}
+                calorieGoal={goals.calories}
+                unitSystem={unitSystem}
+                defaultAddAt={addAt}
+                onAddAt={goToSearch}
+                onPressWater={setEditingWater}
+                onNowLayout={setNowY}
+              />
+            </View>
 
             {waterGoal && (
               <>
@@ -191,24 +194,26 @@ export default function NutritionScreen() {
                 <ThemedView type="surface" style={styles.waterCard}>
                   <View style={styles.waterTopRow}>
                     <WaterBottle
-                      progress={dailyWaterTarget > 0 ? todayWater / dailyWaterTarget : 0}
+                      progress={dailyWaterTarget > 0 ? dayWater / dailyWaterTarget : 0}
                       size={64}
                     />
                     <View style={styles.waterStats}>
                       <ThemedText type="subtitle">
-                        {toDisplayVolume(todayWater, unitSystem)}
+                        {toDisplayVolume(dayWater, unitSystem)}
                         <ThemedText type="small" themeColor="textSecondary">
                           {' '}
                           / {toDisplayVolume(dailyWaterTarget, unitSystem)} {volumeUnitLabel(unitSystem)}
                         </ThemedText>
                       </ThemedText>
                       <View style={styles.waterButtonRow}>
-                        <Pressable style={styles.waterMinusButton} onPress={() => addWater(-quickAdd)}>
-                          <ThemedText type="smallBold" themeColor="textSecondary">
-                            −{quickAdd} {volumeUnitLabel(unitSystem)}
-                          </ThemedText>
-                        </Pressable>
-                        <Pressable style={styles.quickAddButton} onPress={() => addWater(quickAdd)}>
+                        {latestWater && (
+                          <Pressable style={styles.waterMinusButton} onPress={() => deleteWaterEntry(latestWater.id)}>
+                            <ThemedText type="smallBold" themeColor="textSecondary">
+                              Undo last
+                            </ThemedText>
+                          </Pressable>
+                        )}
+                        <Pressable style={styles.quickAddButton} onPress={addWater}>
                           <ThemedText type="smallBold" style={{ color: colors.primaryLight }}>
                             +{quickAdd} {volumeUnitLabel(unitSystem)}
                           </ThemedText>
@@ -220,6 +225,13 @@ export default function NutritionScreen() {
               </>
             )}
           </ScrollView>
+          <WaterEntrySheet
+            entry={editingWater}
+            unitSystem={unitSystem}
+            onSave={updateWaterEntry}
+            onDelete={deleteWaterEntry}
+            onClose={() => setEditingWater(null)}
+          />
         </SafeAreaView>
       </ScreenBackground>
     </TabFadeView>
@@ -244,49 +256,6 @@ function RemainingCalories({ date, remaining }: { date: string; remaining: numbe
         {remaining >= 0 ? ' cal remaining' : ' cal over target'}
       </ThemedText>
     </Animated.View>
-  );
-}
-
-/** Brand, serving size, then the condensed macro breakdown for this one entry. */
-function servingLabel(entry: FoodLogEntry): string {
-  const parts = [
-    entry.brand,
-    entry.grams !== undefined ? `${Math.round(entry.grams)} g` : undefined,
-    macroSummary(entry),
-  ].filter((part): part is string => !!part);
-  return parts.join(' · ');
-}
-
-function FoodRow({
-  entry,
-  divider,
-  onDelete,
-}: {
-  entry: FoodLogEntry;
-  divider: boolean;
-  onDelete: () => void;
-}) {
-  const serving = servingLabel(entry);
-  return (
-    <Pressable
-      style={[styles.foodRow, divider && styles.rowDivider]}
-      onPress={() => router.push({ pathname: '/food/[id]', params: { id: entry.id } })}>
-      <View style={styles.foodText}>
-        <ThemedText type="smallBold" numberOfLines={1}>
-          {entry.name}
-        </ThemedText>
-        {serving && (
-          <ThemedText type="small" numberOfLines={1} themeColor="textSecondary">
-            {serving}
-          </ThemedText>
-        )}
-      </View>
-      <ThemedText type="statInline">{Math.round(entry.calories)}</ThemedText>
-      <ThemedText type="small">cal</ThemedText>
-      <Pressable hitSlop={8} onPress={onDelete}>
-        <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.textSecondary} />
-      </Pressable>
-    </Pressable>
   );
 }
 
@@ -426,39 +395,6 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     textTransform: 'uppercase',
-  },
-  mealSection: {
-    gap: Spacing.two,
-  },
-  mealHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  mealCard: {
-    borderRadius: Radius.lg,
-    backgroundColor: colors.surface,
-    paddingHorizontal: Spacing.three,
-  },
-  foodRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.three,
-  },
-  foodText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  addRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.three,
-  },
-  rowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
   },
   macroBar: {
     gap: Spacing.one,
